@@ -23,6 +23,7 @@ class Worker(mp.Process):
         self.send_interval = send_interval
         self.storage = BatchStorage(n_steps, gamma)
         self.size = size
+        self.memory = []
         
         self.model = DuelingDQN(self.env)
         self.writer = SummaryWriter(comment="-{}-actor{}".format(env_id, worker_id))
@@ -43,6 +44,7 @@ class Worker(mp.Process):
         episode_reward, episode_length, episode_idx, actor_idx = 0, 0, 0, 0
         state = self.env.reset()
         self.storage.reset()
+        self.memory = []
         # while actor_idx < self.size:
         while True:
             action, q_values = self.model.act(torch.FloatTensor(np.array(state)), self.epsilon)
@@ -63,17 +65,17 @@ class Worker(mp.Process):
                 episode_length = 0
                 episode_idx += 1
 
-            if len(self.storage) == self.send_interval:
+
+            if done or len(self.storage) == self.send_interval:
                 batch, prios = self.storage.make_batch()
-                self.lock.acquire()
-                for sample in zip(*batch, prios):
-                    self.buffer.add(*sample)
+                self.memory.append((*batch, prios))
                 # for i in range(len(prios)):
                 #     self.buffer.add(batch[0][i],batch[1][i],batch[2][i],batch[3][i],batch[4][i],prios[i])
 
-                self.lock.release()
                 batch, prios = None, None
                 self.storage.reset()
+            if done:
+                break
     def run(self):
         while True:
             ########## run loop
@@ -81,6 +83,7 @@ class Worker(mp.Process):
             if task["desc"] == "record_batch":
                 # print("start record batch")
                 self.record_batch()
+                self.buffer.put(self.memory)
                 self.task_queue.task_done()
                 # print("record batch done")
             elif task["desc"] == "set_pi_weights":
@@ -106,7 +109,7 @@ class BatchRecorder():
         # parallelization
         self.env_seed = env_seed
         self.task_queue = mp.JoinableQueue()
-
+        self.res_queue = mp.Queue()
         self.size = 1e5
 
         self.worker_batch_sizes = [self.size // self.n_workers] * self.n_workers
@@ -116,8 +119,8 @@ class BatchRecorder():
             self.workers.append(
                 Worker(worker_id=i, env_id=self.env_id, seed=self.env_seed+i, 
                         epsilon= 0.4 ** (1 + i / (n_workers - 1) * 7), n_steps=n_steps,
-                        gamma=gamma, send_interval=5, size = self.worker_batch_sizes[i], max_episode_length=max_episode_length,
-                        task_queue=self.task_queue, buffer=self.buffer, lock = lock))
+                        gamma=gamma, send_interval=50, size = self.worker_batch_sizes[i], max_episode_length=max_episode_length,
+                        task_queue=self.task_queue, buffer=self.res_queue, lock = lock))
         for i, worker in enumerate(self.workers):
             worker.start()
 
@@ -127,6 +130,11 @@ class BatchRecorder():
         for _ in range(self.n_workers):
             self.task_queue.put(task)
         self.task_queue.join()
+        for i in range(self.n_workers):
+            mem = self.res_queue.get()
+            for sample in mem:
+                for i in range(len(sample[0])):
+                    self.buffer.add(sample[0][i],sample[1][i],sample[2][i],sample[3][i],sample[4][i],sample[5][i])
 
 
     def set_worker_weights(self, pi):

@@ -36,8 +36,6 @@ class DuelingDQN(nn.Module):
             self.features = nn.Sequential(
                 init(nn.Linear(self.input_shape[0],128)),
                 nn.ReLU(),
-                init(nn.Linear(128,128)),
-                nn.ReLU(),
 
             )
         # self.l1 = nn.Linear(self._feature_size(), 512)

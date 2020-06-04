@@ -9,8 +9,9 @@ from batchrecorder import BatchRecorder
 import gym
 from multiprocessing import Process
 from memory import CustomPrioritizedReplayBuffer
+import copy
 class train_DQN():
-    def __init__(self,env_id, seed = 0, lr = 1e-5, n_step = 3, gamma = 0.99, n_workers=2,
+    def __init__(self,env_id, seed = 0, lr = 1e-5, n_step = 3, gamma = 0.99, n_workers=8,
                     max_norm = 40, target_update_interval=2500, save_interval = 5000, batch_size = 64,
                     buffer_size = 1e6, prior_alpha = 0.6, prior_beta = 0.4,
                     publish_param_interval = 25, max_step = 1e5):
@@ -43,7 +44,15 @@ class train_DQN():
         
         learn_idx = 0
         while True:
-            batch, idxes = self.buffer.sample(self.batch_size, self.prior_beta)
+            states, actions, rewards, next_states, dones, weights, idxes = self.buffer.sample(self.batch_size, self.prior_beta)
+            states = torch.FloatTensor(states).to(self.device)
+            actions = torch.LongTensor(actions).to(self.device)
+            rewards = torch.FloatTensor(rewards).to(self.device)
+            next_states = torch.FloatTensor(next_states).to(self.device)
+            dones = torch.FloatTensor(dones).to(self.device)
+            weights = torch.FloatTensor(weights).to(self.device)
+            batch = (states, actions, rewards, next_states, dones, weights)
+
             loss, prios = utils.compute_loss(self.model, self.tgt_model, batch, self.n_step, self.gamma)
             grad_norm = utils.update_parameters(loss, self.model, self.optimizer, self.max_norm)
             
@@ -62,23 +71,38 @@ class train_DQN():
                 print("Saving Model..")
                 torch.save(self.model.state_dict(), "model{}.pth".format(learn_idx))
             if learn_idx % self.publish_param_interval == 0:
-                self.batch_recorder.set_worker_weights(self.model.state_dict())
+                self.batch_recorder.set_worker_weights(copy.deepcopy(self.model))
             if learn_idx >= self.max_step:
                 torch.save(self.model.state_dict(), "model{}.pth".format(learn_idx))
                 self.batch_recorder.cleanup()
                 break
-
+    def load_model(self):
+         with open("model{}.pth".format(100000), "rb") as f:
+                print("loading weights_{}".format(100000))
+                self.model.load_state_dict(torch.load(f,map_location="cpu"))
     def sampling_data(self):
         self.batch_recorder.record_batch()
 
-        
+training = True
 if __name__ == "__main__":
     test = train_DQN(env_id="MountainCar-v0")
-    procs = [
-        Process(target=test.sampling_data()),
-        Process(target=test.train())
-    ]
-    for p in procs:
-        p.start()
-    for p in procs:
-        p.join()
+    if training:
+        procs = [
+            Process(target=test.sampling_data()),
+            Process(target=test.train())
+        ]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join()
+    else:
+        test.device = "cpu"
+        test.model.to("cpu")
+        test.load_model()
+        s = test.env.reset()
+        s = torch.FloatTensor(s)
+        while True:
+            test.env.render()
+            a,_ = test.model.act(s, epsilon=0)
+            s, r, d, _ = test.env.step(a)
+            s = torch.FloatTensor(s)
