@@ -15,37 +15,55 @@ class DuelingDQN(nn.Module):
         super(DuelingDQN, self).__init__()
 
         self.input_shape = env.observation_space.shape
+        if len(self.input_shape) == 3:
+            self.cnn = True
+        else:
+            self.cnn = False
+
         self.num_actions = env.action_space.n
 
         self.flatten = Flatten()
+        if self.cnn:
+            self.features = nn.Sequential(
+                init(nn.Conv2d(self.input_shape[0], 32, kernel_size=8, stride=4)),
+                nn.ReLU(),
+                init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
+                nn.ReLU(),
+                init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
+                nn.ReLU()
+            )
+        else:
+            self.features = nn.Sequential(
+                init(nn.Linear(self.input_shape[0],128)),
+                nn.ReLU(),
+                init(nn.Linear(128,128)),
+                nn.ReLU(),
 
-        self.features = nn.Sequential(
-            init(nn.Conv2d(self.input_shape[0], 32, kernel_size=8, stride=4)),
-            nn.ReLU(),
-            init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
-            nn.ReLU(),
-            init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
-            nn.ReLU()
-        )
-
+            )
+        # self.l1 = nn.Linear(self._feature_size(), 512)
+        # self.adv = nn.Linear(512, self.num_actions)
         self.advantage = nn.Sequential(
-            init(nn.Linear(self._feature_size(), 512)),
+            init(nn.Linear(self._feature_size(), 128)),
             nn.ReLU(),
-            init(nn.Linear(512, self.num_actions))
+            init(nn.Linear(128, self.num_actions))
         )
 
         self.value = nn.Sequential(
-            init(nn.Linear(self._feature_size(), 512)),
+            init(nn.Linear(self._feature_size(), 128)),
             nn.ReLU(),
-            init(nn.Linear(512, 1))
+            init(nn.Linear(128, 1))
         )
 
     def forward(self, x):
         x = self.features(x)
         x = self.flatten(x)
+        # x = self.l1(x)
+        # advantage = self.adv(x)
+        # print(advantage)
         advantage = self.advantage(x)
         value = self.value(x)
         return value + advantage - advantage.mean(1, keepdim=True)
+        # return torch.ones((1,self.num_actions))
 
     def _feature_size(self):
         return self.features(torch.zeros(1, *self.input_shape)).view(1, -1).size(1)

@@ -34,7 +34,7 @@ def connect_param_socket(ctx, param_socket, learner_ip, actor_id):
     socket.close()
 
 
-def recv_param(learner_ip, actor_id, param_queue):
+def recv_param_eval(learner_ip, actor_id, param_queue):
     ctx = zmq.Context()
     param_socket = ctx.socket(zmq.SUB)
     param_socket.setsockopt(zmq.SUBSCRIBE, b'')
@@ -46,7 +46,7 @@ def recv_param(learner_ip, actor_id, param_queue):
         param_queue.put(param)
 
 
-def exploration(args, actor_id, param_queue):
+def exploration_eval(args, actor_id, param_queue):
     writer = SummaryWriter(comment="-{}-eval".format(args.env))
 
     args.clip_rewards = False
@@ -92,8 +92,8 @@ def main():
     param_queue = Queue(maxsize=3)
 
     procs = [
-        Process(target=exploration, args=(args, -1, param_queue)),
-        Process(target=recv_param, args=(learner_ip, -1, param_queue)),
+        Process(target=exploration_eval, args=(args, -1, param_queue)),
+        Process(target=recv_param_eval, args=(learner_ip, -1, param_queue)),
     ]
 
     for p in procs:
