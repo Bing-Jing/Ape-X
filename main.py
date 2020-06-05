@@ -83,7 +83,7 @@ class train_DQN():
     def sampling_data(self):
         self.batch_recorder.record_batch()
 
-training = True
+training = False
 if __name__ == "__main__":
     test = train_DQN(env_id="MountainCar-v0")
     if training:
@@ -99,10 +99,18 @@ if __name__ == "__main__":
         test.device = "cpu"
         test.model.to("cpu")
         test.load_model()
-        s = test.env.reset()
-        s = torch.FloatTensor(s)
-        while True:
-            test.env.render()
-            a,_ = test.model.act(s, epsilon=0)
-            s, r, d, _ = test.env.step(a)
+        
+        for i in range(10):
+            ar = 0
+            d = False
+            s = test.env.reset()
             s = torch.FloatTensor(s)
+            while True:
+                test.env.render()
+                a,_ = test.model.act(s, epsilon=0)
+                s, r, d, _ = test.env.step(a)
+                ar += r
+                s = torch.FloatTensor(s)
+                if d:
+                    print(ar)
+                    break

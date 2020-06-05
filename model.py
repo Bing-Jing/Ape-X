@@ -78,7 +78,7 @@ class DuelingDQN(nn.Module):
                 action = q_values.max(1)[1].item()
             else:
                 action = random.randrange(self.num_actions)
-        return action, q_values.numpy()[0]
+        return action, q_values.cpu().numpy()[0]
 
 
 class Flatten(nn.Module):

@@ -26,7 +26,7 @@ class Worker(mp.Process):
         self.memory = []
         
         self.model = DuelingDQN(self.env)
-        self.writer = SummaryWriter(comment="-{}-actor{}".format(env_id, worker_id))
+        # self.writer = SummaryWriter(comment="-{}-actor{}".format(env_id, worker_id))
         self.lock = lock
 
         self.set_all_seeds()
@@ -59,8 +59,8 @@ class Worker(mp.Process):
             actor_idx += 1
             if done or episode_length >= self.max_episode_length:
                 state = self.env.reset()
-                self.writer.add_scalar("actor/episode_reward", episode_reward, episode_idx)
-                self.writer.add_scalar("actor/episode_length", episode_length, episode_idx)
+                # self.writer.add_scalar("actor/episode_reward", episode_reward, episode_idx)
+                # self.writer.add_scalar("actor/episode_length", episode_length, episode_idx)
                 episode_reward = 0
                 episode_length = 0
                 episode_idx += 1

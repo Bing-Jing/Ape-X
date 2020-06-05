@@ -11,10 +11,10 @@ from multiprocessing import Process
 from memory import CustomPrioritizedReplayBuffer
 import copy
 class train_DQN():
-    def __init__(self,env_id, seed = 0, lr = 1e-5, n_step = 3, gamma = 0.99, n_workers=8,
+    def __init__(self,env_id, seed = 0, lr = 1e-5, n_step = 3, gamma = 0.99, n_workers=20,
                     max_norm = 40, target_update_interval=2500, save_interval = 5000, batch_size = 64,
                     buffer_size = 1e6, prior_alpha = 0.6, prior_beta = 0.4,
-                    publish_param_interval = 25, max_step = 1e5):
+                    publish_param_interval = 32, max_step = 1e5):
         self.env = gym.make(env_id)
         self.seed = seed
         self.lr = lr
@@ -35,7 +35,8 @@ class train_DQN():
         self.tgt_model = DuelingDQN(self.env).to(self.device)
         self.tgt_model.load_state_dict(self.model.state_dict())
         self.optimizer = torch.optim.RMSprop(self.model.parameters(), self.lr, alpha=0.95, eps=1.5e-7, centered=True)
-
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,step_size=1000,gamma=0.99)
+        self.beta_by_frame = lambda frame_idx: min(1.0, self.prior_beta + frame_idx * (1.0 - self.prior_beta) / 1000)
         self.batch_recorder = BatchRecorder(env_id=env_id, env_seed=seed, n_workers=n_workers, buffer= self.buffer,
                 n_steps=n_step, gamma=gamma, max_episode_length=50000)
         self.writer = SummaryWriter(comment="-{}-learner".format(self.env.unwrapped.spec.id))
@@ -44,7 +45,8 @@ class train_DQN():
         
         learn_idx = 0
         while True:
-            states, actions, rewards, next_states, dones, weights, idxes = self.buffer.sample(self.batch_size, self.prior_beta)
+            beta = self.beta_by_frame(learn_idx)
+            states, actions, rewards, next_states, dones, weights, idxes = self.buffer.sample(self.batch_size, beta)
             states = torch.FloatTensor(states).to(self.device)
             actions = torch.LongTensor(actions).to(self.device)
             rewards = torch.FloatTensor(rewards).to(self.device)
@@ -54,6 +56,8 @@ class train_DQN():
             batch = (states, actions, rewards, next_states, dones, weights)
 
             loss, prios = utils.compute_loss(self.model, self.tgt_model, batch, self.n_step, self.gamma)
+            
+            self.scheduler.step()
             grad_norm = utils.update_parameters(loss, self.model, self.optimizer, self.max_norm)
             
             self.buffer.update_priorities(idxes, prios)
@@ -76,14 +80,14 @@ class train_DQN():
                 torch.save(self.model.state_dict(), "model{}.pth".format(learn_idx))
                 self.batch_recorder.cleanup()
                 break
-    def load_model(self):
-         with open("model{}.pth".format(100000), "rb") as f:
-                print("loading weights_{}".format(100000))
+    def load_model(self,idx):
+         with open("model{}.pth".format(idx), "rb") as f:
+                print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
     def sampling_data(self):
         self.batch_recorder.record_batch()
 
-training = True
+training = False
 if __name__ == "__main__":
     test = train_DQN(env_id="MountainCar-v0")
     if training:
@@ -98,11 +102,19 @@ if __name__ == "__main__":
     else:
         test.device = "cpu"
         test.model.to("cpu")
-        test.load_model()
-        s = test.env.reset()
-        s = torch.FloatTensor(s)
-        while True:
-            test.env.render()
-            a,_ = test.model.act(s, epsilon=0)
-            s, r, d, _ = test.env.step(a)
+        test.load_model(100000)
+        for i in range(10):
+            s = test.env.reset()
             s = torch.FloatTensor(s)
+            er = 0
+            d = False
+            while True:
+                test.env.render()
+                a,_ = test.model.act(s, epsilon=0)
+                s, r, d, _ = test.env.step(a)
+                er+=r
+                s = torch.FloatTensor(s)
+                if d:
+                    print(er)
+                    break
+        test.env.close()
