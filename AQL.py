@@ -27,8 +27,10 @@ class train_DQN():
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.env = gym.make(env_id)
-        self.model = AQL(env = self.env, propose_sample=propose_sample, uniform_sample = uniform_sample, action_var = action_var).to(self.device)
-        self.target_model = AQL(env = self.env, propose_sample=propose_sample, uniform_sample = uniform_sample, action_var = action_var).to(self.device)
+        self.model = AQL(env = self.env, propose_sample=propose_sample, uniform_sample = uniform_sample,
+                             action_var = action_var, device=self.device).to(self.device)
+        self.target_model = AQL(env = self.env, propose_sample=propose_sample, uniform_sample = uniform_sample,
+                             action_var = action_var,device=self.device).to(self.device)
         self.target_model.load_state_dict(self.model.state_dict())
 
 

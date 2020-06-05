@@ -111,8 +111,9 @@ def init(module):
 ################################
 
 class AQL(nn.Module):
-    def __init__(self, env, propose_sample=100, uniform_sample = 400, action_var = 0.25):
+    def __init__(self, env, propose_sample=100, uniform_sample = 400, action_var = 0.25, device = "cuda"):
         super(AQL, self).__init__()
+        self.device = device
         self.env = env
         self.input_shape = self.env.observation_space.shape
         self.env_iscontinuous = isinstance(self.env.action_space, gym.spaces.Box)
@@ -125,7 +126,8 @@ class AQL(nn.Module):
         self.q = Q_Network(input_shape = self.input_shape, num_actions= self.num_actions, total_sample = self.total_sample,
                             env_iscontinuous = self.env_iscontinuous)
         
-        self.proposal = Proposal_Network(self.env, propose_sample=propose_sample, uniform_sample = uniform_sample, action_var = action_var)
+        self.proposal = Proposal_Network(self.env, propose_sample=propose_sample,
+                            uniform_sample = uniform_sample, action_var = action_var, device=self.device)
 
     def forward(self, state, epsilon):
         x = self.q.embedding_feature(state)
@@ -210,9 +212,8 @@ class Q_Network(nn.Module):
 
     
     def act(self, state, a_mu, epsilon):
-            print(a_mu.shape)
             a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
-            a_feature = F.softmax(a_mu).reshape(a_mu.shape[0],-1) # ???????????????????????
+            a_feature = F.softmax(a_mu,dim=1).reshape(a_mu.shape[0],-1) # ???????????????????????
 
             q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)
             a_out = self.action_out(a_feature)
@@ -225,14 +226,15 @@ class Q_Network(nn.Module):
 
             if random.random() > epsilon:
                 idx = torch.argmax(q_values,dim=1)
-                action = idx[0]
+                action = idx[0].cpu().numpy()
             else:
                 action = random.choice(list(range(a_mu[0].shape[0])))
             return action, q_values
 
 class Proposal_Network(nn.Module):
-    def __init__(self, env, propose_sample=100, uniform_sample = 100, action_var = 0.25):
+    def __init__(self, env, propose_sample=100, uniform_sample = 100, action_var = 0.25, device="cuda"):
         super(Proposal_Network, self).__init__()
+        self.device = device
         self.env = env
         self.input_shape = env.observation_space.shape
         self.env_iscontinuous = isinstance(self.env.action_space, gym.spaces.Box)
@@ -258,28 +260,28 @@ class Proposal_Network(nn.Module):
     def forward(self,embed_state):
             mu = self.dist_feature(embed_state)
             if self.env_iscontinuous: # continuous
-                cov_mat = torch.diag(self.action_var)
+                cov_mat = torch.diag(self.action_var).to(self.device)
                 dist = MultivariateNormal(mu, cov_mat)
-                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample])
-                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions))
-                a_mu = torch.cat([a_uniform,a_dist],dim=1)
+                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample]).to(self.device)
+                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions)).to(self.device)
+                a_mu = torch.cat([a_uniform,a_dist],dim=1).to(self.device)
             else:  # discrete
                 dist = Categorical(logits=mu)
-                a_mu = dist.sample([self.num_actions])
+                a_mu = dist.sample([self.num_actions]).to(self.device)
 
             return a_mu
 
     def evaluate(self, embed_state):
             mu = self.dist_feature(embed_state)
             if self.env_iscontinuous: # continuous
-                cov_mat = torch.diag(self.action_var)
+                cov_mat = torch.diag(self.action_var).to(self.device)
                 dist = MultivariateNormal(mu, cov_mat)
-                a_uniform = self.uniform.sample([self.uniform_sample])
-                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.num_actions))
-                a_mu = torch.cat([a_uniform,a_dist])
+                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample]).to(self.device)
+                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions)).to(self.device)
+                a_mu = torch.cat([a_uniform,a_dist],dim=1).to(self.device)
             else:  # discrete
                 dist = Categorical(logits=mu)
-                a_mu = dist.sample([self.num_actions])
+                a_mu = dist.sample([self.num_actions]).to(self.device)
 
             return a_mu, dist
         
