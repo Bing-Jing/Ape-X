@@ -159,8 +159,8 @@ class Q_Network(nn.Module):
         self.num_actions = num_actions
         self.env_iscontinuous = env_iscontinuous
 
-        self.a_out_unit = 300
-        self.feature_out_unit = 300
+        self.a_out_unit = 128
+        self.feature_out_unit = 128
         self.concat_unit = self.a_out_unit + self.feature_out_unit
 
         if self.cnn:
@@ -180,17 +180,17 @@ class Q_Network(nn.Module):
 
         
         self.q_feature = nn.Sequential(
-                init(nn.Linear(self.input_shape[0],400)),
+                init(nn.Linear(self.input_shape[0],128)),
                 nn.ReLU(),
-                init(nn.Linear(400,self.feature_out_unit))
+                init(nn.Linear(128,self.feature_out_unit))
             )
         
-        self.action_out = nn.Linear(self.num_actions*self.total_sample, self.a_out_unit) #????????????????
+        self.action_out = nn.Linear(self.num_actions, self.a_out_unit) #????????????????
 
         self.advantage = nn.Sequential(
             init(nn.Linear(self.concat_unit, 128)),
             nn.ReLU(),
-            init(nn.Linear(128, self.total_sample))
+            init(nn.Linear(128, 1))
         )
 
         self.value = nn.Sequential(
@@ -213,17 +213,13 @@ class Q_Network(nn.Module):
     
     def act(self, state, a_mu, epsilon):
             a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
-            a_feature = F.softmax(a_mu,dim=1).reshape(a_mu.shape[0],-1) # ???????????????????????
-
-            q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)
-            a_out = self.action_out(a_feature)
-            # print(q_f.shape, a_out.shape)
-            
-            x = torch.cat([a_out,q_f],dim=1)
+            a_feature = a_mu.reshape(-1, self.num_actions)
+            a_out = self.action_out(a_feature).reshape(-1,self.total_sample, self.a_out_unit)
+            q_f = torch.cat(self.total_sample*[self.q_feature(state)]).reshape(-1, self.total_sample, self.feature_out_unit)
+            x = torch.cat([a_out,q_f],dim=2)
             x = F.relu(x)
-            q_values = self.forward(x)
+            q_values = self.forward(x).reshape(a_mu.shape[0], self.total_sample)
             # print(q_values.shape)
-
             if random.random() > epsilon:
                 idx = torch.argmax(q_values,dim=1)
                 action = idx[0].cpu().numpy()
@@ -246,11 +242,11 @@ class Proposal_Network(nn.Module):
             self.num_actions = env.action_space.n
         
         self.dist_feature = nn.Sequential(
-                init(nn.Linear(128,300)),
+                init(nn.Linear(128,128)),
                 nn.ReLU(),
-                init(nn.Linear(300,200)),
+                init(nn.Linear(128,128)),
                 nn.ReLU(),
-                init(nn.Linear(200,self.num_actions))
+                init(nn.Linear(128,self.num_actions))
             )
         self.action_out_feature = nn.Linear(self.num_actions,300)
         self.action_var = torch.full((self.num_actions,), action_var)

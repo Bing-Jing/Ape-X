@@ -13,10 +13,10 @@ from memory import PrioritizedReplayBuffer
 from tensorboardX import SummaryWriter
 
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4, 
-                    epsilon_start = 1.0, epsilon_final = 0.01, epsilon_decay = 500,
-                    batch_size = 32, gamma = 0.99, target_update_interval=1000, save_interval = 10000,
-                    propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8):
+    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4, 
+                    epsilon_start = 0.9, epsilon_final = 0.01, epsilon_decay = 1e4,
+                    batch_size = 32, gamma = 0.99, target_update_interval=1000, save_interval = 1e4,
+                    propose_sample=100, uniform_sample = 400, action_var = 1, ent_lam = 0.8):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -24,6 +24,7 @@ class train_DQN():
         self.target_update_interval = target_update_interval
         self.save_interval = save_interval
         self.ent_lam = ent_lam
+        self.lr = 1e-4
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.env = gym.make(env_id)
@@ -35,17 +36,17 @@ class train_DQN():
 
 
         self.replay_buffer = PrioritizedReplayBuffer(100000,alpha=prior_alpha)
-        self.optimizer_q = optim.Adam(self.model.q.parameters())
-        self.optimizer_proposal = optim.Adam(self.model.proposal.parameters())
+        self.optimizer_q = optim.Adam(self.model.q.parameters(), self.lr)
+        self.optimizer_proposal = optim.Adam(self.model.proposal.parameters(), self.lr)
         
         self.writer = SummaryWriter(comment="-{}-learner".format(self.env.unwrapped.spec.id))
 
 
         # decay function
-        self.scheduler_q = optim.lr_scheduler.StepLR(self.optimizer_q,step_size=1000,gamma=0.99)
-        self.scheduler_proposal = optim.lr_scheduler.StepLR(self.optimizer_q,step_size=1000,gamma=0.99)
+        self.scheduler_q = optim.lr_scheduler.CosineAnnealingLR(self.optimizer_q,T_max=self.max_step,eta_min=self.lr/1000)
+        self.scheduler_proposal = optim.lr_scheduler.CosineAnnealingLR(self.optimizer_proposal,T_max=self.max_step,eta_min=self.lr/1000)
 
-        self.beta_by_frame = lambda frame_idx: min(1.0, self.prior_beta_start + frame_idx * (1.0 - self.prior_beta_start) / 1000)
+        self.beta_by_frame = lambda frame_idx: min(1.0, self.prior_beta_start + frame_idx * (1.0 - self.prior_beta_start) / 1e5)
         self.epsilon_by_frame = lambda frame_idx: epsilon_final + (epsilon_start - epsilon_final) * math.exp(-1. * frame_idx / epsilon_decay)
         
     def update_target(self,current_model, target_model):
@@ -61,15 +62,15 @@ class train_DQN():
         
         _, a_mu, q_values      = self.model(state, 0)
         _, _, next_q_values = self.target_model(next_state, 0)
-
-        q_value = q_values[torch.arange(batch_size), action]
-
-        next_q_value     = next_q_values.max(1)[0]
+        q_value = q_values[torch.arange(batch_size), action].to(self.device)
+        
+        next_q_value     = next_q_values.max(1)[0].to(self.device)
         expected_q_value = reward + self.gamma * next_q_value * (1 - done)
         
         td_error = torch.abs(expected_q_value.detach() - q_value)
+        
         loss_q  = (td_error).pow(2) * weights
-        prios = loss_q+1e-5#0.9 * torch.max(td_error)+(1-0.9)*td_error
+        prios = td_error+1e-5#0.9 * torch.max(td_error)+(1-0.9)*td_error
         loss_q  = loss_q.mean()
         
         embed_state = self.model.q.embedding_feature(state)
@@ -85,11 +86,13 @@ class train_DQN():
         loss_p = torch.mean(loss_p)
         self.optimizer_proposal.zero_grad()
         loss_p.backward()
+        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
         self.scheduler_proposal.step()
         self.optimizer_proposal.step()
 
         self.optimizer_q.zero_grad()
         loss_q.backward()
+        # torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 10)
         self.scheduler_q.step()
         self.replay_buffer.update_priorities(indices, prios.data.cpu().numpy())
         self.optimizer_q.step()
@@ -137,7 +140,7 @@ class train_DQN():
                 print("save model...")
                 self.save_model(frame_idx)
 
-            
+        self.env.close()
     def save_model(self, idx):
         torch.save(self.model.state_dict(), "./model{}.pth".format(idx))
     def load_model(self,idx):
@@ -147,26 +150,26 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "LunarLanderContinuous-v2"
+    env_id = "BipedalWalker-v3"
 
     test = train_DQN(env_id=env_id)
     if training:
         test.train()
     else:
-        test.device = "cpu"
-        test.model.to("cpu")
-        test.load_model(99999)
+        # test.device = "cpu"
+        # test.model.to("cpu")
+        test.load_model(100000)
         for i in range(10):
             s = test.env.reset()
-            s = torch.FloatTensor(s)
+            s = torch.FloatTensor(s).to(test.device)
             er = 0
             d = False
             while True:
-                test.env.render()
-                a,_ = test.model.act(s, epsilon=0)
-                s, r, d, _ = test.env.step(a)
+                test.env.render(mode='rgb_array')
+                a, a_mu,_ = test.model.act(s, epsilon=0)
+                s, r, d, _ = test.env.step(a_mu[0][a])
                 er+=r
-                s = torch.FloatTensor(s)
+                s = torch.FloatTensor(s).to(test.device)
                 if d:
                     print(er)
                     break
