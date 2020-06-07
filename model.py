@@ -129,13 +129,13 @@ class AQL(nn.Module):
         self.proposal = Proposal_Network(self.env, propose_sample=propose_sample,
                             uniform_sample = uniform_sample, action_var = action_var, device=self.device)
 
-    def forward(self, state, epsilon):
+    def forward(self, state, a_mu):
         x = self.q.embedding_feature(state)
     
-        a_mu = self.proposal.forward(x)
+        # a_mu = self.proposal.forward(x)
 
-        action, q_values = self.q.act(state, a_mu, epsilon)
-        return action, a_mu.cpu().numpy(), q_values
+        action, q_values = self.q.act(state, a_mu, 0)
+        return a_mu.cpu().numpy(), q_values
 
     def act(self, state, epsilon):
         with torch.no_grad():
@@ -159,8 +159,8 @@ class Q_Network(nn.Module):
         self.num_actions = num_actions
         self.env_iscontinuous = env_iscontinuous
 
-        self.a_out_unit = 128
-        self.feature_out_unit = 128
+        self.a_out_unit = 300
+        self.feature_out_unit = 300
         self.concat_unit = self.a_out_unit + self.feature_out_unit
 
         if self.cnn:
@@ -180,12 +180,12 @@ class Q_Network(nn.Module):
 
         
         self.q_feature = nn.Sequential(
-                init(nn.Linear(self.input_shape[0],128)),
+                init(nn.Linear(self.input_shape[0],400)),
                 nn.ReLU(),
-                init(nn.Linear(128,self.feature_out_unit))
+                init(nn.Linear(400,self.feature_out_unit))
             )
         
-        self.action_out = nn.Linear(self.num_actions, self.a_out_unit) #????????????????
+        self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
 
         self.advantage = nn.Sequential(
             init(nn.Linear(self.concat_unit, 128)),
@@ -224,7 +224,7 @@ class Q_Network(nn.Module):
                 idx = torch.argmax(q_values,dim=1)
                 action = idx[0].cpu().numpy()
             else:
-                action = random.choice(list(range(a_mu[0].shape[0])))
+                action = random.choice(list(range(self.total_sample)))
             return action, q_values
 
 class Proposal_Network(nn.Module):
@@ -242,13 +242,12 @@ class Proposal_Network(nn.Module):
             self.num_actions = env.action_space.n
         
         self.dist_feature = nn.Sequential(
-                init(nn.Linear(128,128)),
+                init(nn.Linear(128,300)),
                 nn.ReLU(),
-                init(nn.Linear(128,128)),
+                init(nn.Linear(300,200)),
                 nn.ReLU(),
-                init(nn.Linear(128,self.num_actions))
+                init(nn.Linear(200,self.num_actions))
             )
-        self.action_out_feature = nn.Linear(self.num_actions,300)
         self.action_var = torch.full((self.num_actions,), action_var)
         if self.env_iscontinuous:
             self.uniform = uniform.Uniform(torch.Tensor(self.env.action_space.low),torch.Tensor(self.env.action_space.high))
@@ -272,13 +271,13 @@ class Proposal_Network(nn.Module):
             if self.env_iscontinuous: # continuous
                 cov_mat = torch.diag(self.action_var).to(self.device)
                 dist = MultivariateNormal(mu, cov_mat)
-                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample]).to(self.device)
-                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions)).to(self.device)
-                a_mu = torch.cat([a_uniform,a_dist],dim=1).to(self.device)
+                # a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample]).to(self.device)
+                # a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions)).to(self.device)
+                # a_mu = torch.cat([a_uniform,a_dist],dim=1).to(self.device)
             else:  # discrete
                 dist = Categorical(logits=mu)
-                a_mu = dist.sample([self.num_actions]).to(self.device)
+                # a_mu = dist.sample([self.num_actions]).to(self.device)
 
-            return a_mu, dist
+            return dist
         
         
