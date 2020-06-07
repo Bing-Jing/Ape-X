@@ -3,4 +3,4 @@
 ## TO DO:
 - [x] proposal action
 - [ ] recurrent DQN
-- [ ] Distributed DQN
+- [x] Distributed DQN

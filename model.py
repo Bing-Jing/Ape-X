@@ -253,14 +253,14 @@ class Proposal_Network(nn.Module):
     def forward(self,embed_state):
             mu = self.dist_feature(embed_state)
             if self.env_iscontinuous: # continuous
-                cov_mat = torch.diag(self.action_var).to(self.device)
+                cov_mat = torch.diag(self.action_var)
                 dist = MultivariateNormal(mu, cov_mat)
-                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample]).to(self.device)
-                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions)).to(self.device)
-                a_mu = torch.cat([a_uniform,a_dist],dim=1).to(self.device)
+                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample])
+                a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions))
+                a_mu = torch.cat([a_uniform,a_dist],dim=1)
             else:  # discrete
                 dist = Categorical(logits=mu)
-                a_mu = dist.sample([self.num_actions]).to(self.device)
+                a_mu = dist.sample([self.num_actions])
 
             return a_mu
 

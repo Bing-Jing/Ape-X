@@ -13,16 +13,18 @@ from model import AQL
 from memory import CustomPrioritizedReplayBuffer_AQL
 from tensorboardX import SummaryWriter
 from batchrecoder_AQL import BatchRecorder
+import copy
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4, 
-                    epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4,
-                    batch_size = 32, gamma = 0.99, target_update_interval=2500, save_interval = 1e4,
+    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4,
+                    epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4, publish_param_interval=10,
+                    batch_size = 32, gamma = 0.99, target_update_interval=25, save_interval = 1e4,
                     propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
         self.gamma = gamma
         self.target_update_interval = target_update_interval
+        self.publish_param_interval = publish_param_interval
         self.save_interval = save_interval
         self.ent_lam = ent_lam
         self.lr = 1e-4
@@ -107,23 +109,27 @@ class train_DQN():
         
         return loss_q, loss_p
     def train(self):
+        learn_idx = 0
         for frame_idx in range(self.max_step):
             
             self.recoder.record_batch()
-                
-            if len(self.replay_buffer) > self.batch_size:
-                beta = self.beta_by_frame(frame_idx)
-                loss_q, loss_p = self.compute_td_loss(self.batch_size, beta)
-                self.writer.add_scalar("learner/loss_q", loss_q, frame_idx)
-                self.writer.add_scalar("learner/loss_proposal", loss_p, frame_idx)
-                
-            if frame_idx % self.target_update_interval == 0:
-                print("update target...")
-                self.update_target(self.model, self.target_model)
+            for i in range(5):
+                learn_idx += 1
+                if len(self.replay_buffer) > self.batch_size:
+                    beta = self.beta_by_frame(frame_idx)
+                    loss_q, loss_p = self.compute_td_loss(self.batch_size, beta)
+                    self.writer.add_scalar("learner/loss_q", loss_q, learn_idx)
+                    self.writer.add_scalar("learner/loss_proposal", loss_p, learn_idx)
+                    
+                if learn_idx % self.target_update_interval == 0:
+                    print("update target...")
+                    self.update_target(self.model, self.target_model)
 
-            if frame_idx % self.save_interval == 0 or frame_idx == self.max_step-1:
-                print("save model...")
-                self.save_model(frame_idx)
+                if learn_idx % self.save_interval == 0 or learn_idx == self.max_step-1:
+                    print("save model...")
+                    self.save_model(learn_idx)
+                if learn_idx % self.publish_param_interval == 0:
+                    self.recoder.set_worker_weights(copy.deepcopy(self.model))
 
         self.env.close()
     def save_model(self, idx):

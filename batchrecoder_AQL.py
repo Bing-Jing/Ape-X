@@ -116,8 +116,7 @@ class BatchRecorder():
             self.writer.add_scalar("actor/episode_reward", ep_r, self.episode_idx )
             self.writer.add_scalar("actor/episode_length", ep_len, self.episode_idx )
             self.episode_idx += 1
-            for j in range(len(mem)):
-                for state, action, reward, next_state, done, a_mu in mem[j]:
+            for (state, action, reward, next_state, done, a_mu) in mem:
                     for _ in range(len(state)):
                         self.buffer.add(state, action, reward, next_state, done, a_mu)
 
