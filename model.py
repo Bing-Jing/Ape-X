@@ -130,12 +130,9 @@ class AQL(nn.Module):
                             uniform_sample = uniform_sample, action_var = action_var, device=self.device)
 
     def forward(self, state, a_mu):
-        x = self.q.embedding_feature(state)
-    
-        # a_mu = self.proposal.forward(x)
 
-        action, q_values = self.q.act(state, a_mu, 0)
-        return a_mu.cpu().numpy(), q_values
+        _, q_values = self.q.act(state, a_mu, 0)
+        return q_values
 
     def act(self, state, epsilon):
         with torch.no_grad():
