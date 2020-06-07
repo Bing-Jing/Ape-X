@@ -136,6 +136,7 @@ class AQL(nn.Module):
 
     def act(self, state, epsilon):
         with torch.no_grad():
+            state = torch.FloatTensor(state)
             x = self.q.embedding_feature(state)
             a_mu = self.proposal.forward(x)
 

@@ -1,7 +1,7 @@
 import math, random
 
 import gym
-import pybulletgym
+# import pybulletgym
 import numpy as np
 
 import torch
@@ -12,12 +12,12 @@ import torch.nn.functional as F
 from model import AQL
 from memory import CustomPrioritizedReplayBuffer_AQL
 from tensorboardX import SummaryWriter
-
+from batchrecoder_AQL import BatchRecorder
 class train_DQN():
     def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4, 
                     epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4,
                     batch_size = 32, gamma = 0.99, target_update_interval=2500, save_interval = 1e4,
-                    propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8):
+                    propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -37,11 +37,15 @@ class train_DQN():
 
 
         self.replay_buffer = CustomPrioritizedReplayBuffer_AQL(100000,alpha=prior_alpha)
+        
         self.optimizer_q = optim.Adam(self.model.q.parameters(), self.lr)
         self.optimizer_proposal = optim.Adam(self.model.proposal.parameters(), self.lr)
         
         self.writer = SummaryWriter(comment="-{}-learner".format(self.env.unwrapped.spec.id))
-
+        self.recoder = BatchRecorder(env_id, env_seed=0, n_workers=n_workers, buffer=self.replay_buffer, 
+                                        max_episode_length=50000, writer=self.writer,
+                                        propose_sample=propose_sample, uniform_sample = uniform_sample, 
+                                        action_var = action_var, device = self.device)
 
         # decay function
         self.scheduler_q = optim.lr_scheduler.CosineAnnealingLR(self.optimizer_q,T_max=self.max_step,eta_min=self.lr/1000)
@@ -103,31 +107,9 @@ class train_DQN():
         
         return loss_q, loss_p
     def train(self):
-        episode_reward = 0
-        episode_idx = 0
-        episode_length = 0
-        state = self.env.reset()
         for frame_idx in range(self.max_step):
-            # epsilon = self.epsilon_by_frame(frame_idx)
-            epsilon = 0.5 if random.random() > 0.1 else 0.05 # 10% actor epsilon = 0.5
-
-            action, a_mu, _ = self.model.act(torch.FloatTensor((state)).to(self.device), epsilon)
-            a_mu = a_mu[0]
-            next_state, reward, done, _ = self.env.step(a_mu[action])
-            self.replay_buffer.add(state, action, reward, next_state, done, a_mu)
             
-            state = next_state
-            episode_reward += reward
-            
-            episode_length += 1
-            if done:
-                state = self.env.reset()
-                self.writer.add_scalar("actor/episode_reward", episode_reward, episode_idx)
-                self.writer.add_scalar("actor/episode_length", episode_length, episode_idx)
-                # print("episode: ",episode_idx, " reward: ", episode_reward)
-                episode_reward = 0
-                episode_length = 0
-                episode_idx += 1
+            self.recoder.record_batch()
                 
             if len(self.replay_buffer) > self.batch_size:
                 beta = self.beta_by_frame(frame_idx)
