@@ -1,7 +1,7 @@
 import math, random
 
 import gym
-# import pybulletgym
+import pybulletgym
 import numpy as np
 
 import torch
@@ -15,10 +15,10 @@ from tensorboardX import SummaryWriter
 from batchrecoder_AQL import BatchRecorder
 import copy
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4,
-                    epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4, publish_param_interval=10,
-                    batch_size = 32, gamma = 0.99, target_update_interval=25, save_interval = 1e4,
-                    propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8, n_workers=10):
+    def __init__(self, env_id, max_step = 1e3, prior_alpha = 0.6, prior_beta_start = 0.4,
+                    publish_param_interval=10,
+                    batch_size = 32, gamma = 0.99, target_update_interval=10, save_interval = 20,
+                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -27,7 +27,8 @@ class train_DQN():
         self.publish_param_interval = publish_param_interval
         self.save_interval = save_interval
         self.ent_lam = ent_lam
-        self.lr = 1e-4
+        self.lr = 1e-3
+        self.n_workers = n_workers
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.env = gym.make(env_id)
@@ -38,7 +39,7 @@ class train_DQN():
         self.target_model.load_state_dict(self.model.state_dict())
 
 
-        self.replay_buffer = CustomPrioritizedReplayBuffer_AQL(100000,alpha=prior_alpha)
+        self.replay_buffer = CustomPrioritizedReplayBuffer_AQL(1e7,alpha=prior_alpha)
         
         self.optimizer_q = optim.Adam(self.model.q.parameters(), self.lr)
         self.optimizer_proposal = optim.Adam(self.model.proposal.parameters(), self.lr)
@@ -50,11 +51,10 @@ class train_DQN():
                                         action_var = action_var, device = self.device)
 
         # decay function
-        self.scheduler_q = optim.lr_scheduler.CosineAnnealingLR(self.optimizer_q,T_max=self.max_step,eta_min=self.lr/1000)
-        self.scheduler_proposal = optim.lr_scheduler.CosineAnnealingLR(self.optimizer_proposal,T_max=self.max_step,eta_min=self.lr/1000)
+        self.scheduler_q = optim.lr_scheduler.StepLR(self.optimizer_q,step_size=100,gamma=0.95)
+        self.scheduler_proposal = optim.lr_scheduler.StepLR(self.optimizer_proposal,step_size=100,gamma=0.95)
 
-        self.beta_by_frame = lambda frame_idx: min(1.0, self.prior_beta_start + frame_idx * (1.0 - self.prior_beta_start) / self.max_step)
-        self.epsilon_by_frame = lambda frame_idx: epsilon_final + (epsilon_start - epsilon_final) * math.exp(-1. * frame_idx / epsilon_decay)
+        self.beta_by_frame = lambda frame_idx: min(1.0, self.prior_beta_start + frame_idx * (1.0 - self.prior_beta_start) / self.max_step*self.n_workers)
         
     def update_target(self,current_model, target_model):
         target_model.load_state_dict(current_model.state_dict())
@@ -67,7 +67,7 @@ class train_DQN():
         done       = torch.FloatTensor(done).to(self.device)
         weights    = torch.FloatTensor(weights).to(self.device)
         a_mu       = torch.FloatTensor(a_mu).to(self.device)
-        reward = ((reward - reward.mean()) / (reward.std() + 1e-5))*2 -1
+        # reward = ((reward - reward.mean()) / (reward.std() + 1e-5))*2 -1
 
         
         q_values      = self.model(state, a_mu)
@@ -80,7 +80,7 @@ class train_DQN():
         td_error = torch.abs(expected_q_value.detach() - q_value)
         
         loss_q  = (td_error).pow(2) * weights
-        prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
+        prios = 0.9 * torch.max(td_error)+0.1*td_error+1e-5
         loss_q  = loss_q.mean()
         
 
@@ -100,7 +100,7 @@ class train_DQN():
 
         self.optimizer_q.zero_grad()
         loss_q.backward()
-        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
+        # torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
         
         self.replay_buffer.update_priorities(indices, prios.data.cpu().numpy())
         self.optimizer_q.step()
@@ -111,27 +111,27 @@ class train_DQN():
     def train(self):
         learn_idx = 0
         for frame_idx in range(self.max_step):
+            self.recoder.set_worker_weights(copy.deepcopy(self.model))
             
-            self.recoder.record_batch()
-            for i in range(5):
-                learn_idx += 1
+            total_ep = self.recoder.record_batch()
+            for _ in range(total_ep//self.batch_size):
+                
                 if len(self.replay_buffer) > self.batch_size:
                     beta = self.beta_by_frame(frame_idx)
                     loss_q, loss_p = self.compute_td_loss(self.batch_size, beta)
                     self.writer.add_scalar("learner/loss_q", loss_q, learn_idx)
                     self.writer.add_scalar("learner/loss_proposal", loss_p, learn_idx)
                     
-                if learn_idx % self.target_update_interval == 0:
-                    print("update target...")
-                    self.update_target(self.model, self.target_model)
+                learn_idx += 1
+            if frame_idx % self.target_update_interval == 0:
+                print("update target...")
+                self.update_target(self.model, self.target_model)
 
-                if learn_idx % self.save_interval == 0 or learn_idx == self.max_step-1:
-                    print("save model...")
-                    self.save_model(learn_idx)
-                if learn_idx % self.publish_param_interval == 0:
-                    self.recoder.set_worker_weights(copy.deepcopy(self.model))
+            if frame_idx % self.save_interval == 0 or frame_idx == self.max_step-1:
+                print("save model...")
+                self.save_model(frame_idx)
 
-        self.env.close()
+        self.recoder.cleanup()
     def save_model(self, idx):
         torch.save(self.model.state_dict(), "./model{}.pth".format(idx))
     def load_model(self,idx):
@@ -139,9 +139,9 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = True
+training = False
 if __name__ == "__main__":
-    env_id = "MountainCarContinuous-v0"
+    env_id = "MountainCar-v0"
 
     test = train_DQN(env_id=env_id)
     if training:
@@ -149,15 +149,15 @@ if __name__ == "__main__":
     else:
         # test.device = "cpu"
         # test.model.to("cpu")
-        test.load_model(80000)
+        test.load_model(20)
         for i in range(10):
-            # test.env.render()
+            test.env.render()
             s = test.env.reset()
             s = torch.FloatTensor(s).to(test.device)
             er = 0
             d = False
             while True:
-                test.env.render(mode='rgb_array')
+                # test.env.render(mode='rgb_array')
                 a, a_mu,_ = test.model.act(s, epsilon=0)
                 s, r, d, _ = test.env.step(a_mu[0][a])
                 er+=r

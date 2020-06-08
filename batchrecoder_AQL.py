@@ -97,7 +97,7 @@ class BatchRecorder():
         for i in range(self.n_workers):
             self.workers.append(
                 Worker(worker_id=i, env_id=self.env_id, seed=self.env_seed+i, 
-                        epsilon= 0.5 if i < 2 else 0.05, 
+                        epsilon= 0.9 if i < n_workers//2 else 0.05, 
                         max_episode_length=max_episode_length,
                         task_queue=self.task_queue, buffer=self.res_queue,
                         propose_sample=propose_sample, uniform_sample = uniform_sample, 
@@ -108,11 +108,13 @@ class BatchRecorder():
 
     def record_batch(self):
         task = dict([("desc", "record_batch")])
+        total_ep = 0
         for _ in range(self.n_workers):
             self.task_queue.put(task)
         self.task_queue.join()
         for i in range(self.n_workers):
             mem, ep_r, ep_len = self.res_queue.get()
+            total_ep+=ep_len
             self.writer.add_scalar("actor/episode_reward", ep_r, self.episode_idx )
             self.writer.add_scalar("actor/episode_length", ep_len, self.episode_idx )
             self.episode_idx += 1
@@ -120,7 +122,7 @@ class BatchRecorder():
                     for _ in range(len(state)):
                         self.buffer.add(state, action, reward, next_state, done, a_mu)
 
-
+        return total_ep
     def set_worker_weights(self, pi):
         pi.to("cpu")
         task = dict([("desc", "set_pi_weights"),

@@ -157,8 +157,8 @@ class Q_Network(nn.Module):
         self.num_actions = num_actions
         self.env_iscontinuous = env_iscontinuous
 
-        self.a_out_unit = 300
-        self.feature_out_unit = 300
+        self.a_out_unit = 64
+        self.feature_out_unit = 64
         self.concat_unit = self.a_out_unit + self.feature_out_unit
 
         if self.cnn:
@@ -178,23 +178,25 @@ class Q_Network(nn.Module):
 
         
         self.q_feature = nn.Sequential(
-                init(nn.Linear(self.input_shape[0],400)),
+                init(nn.Linear(self.input_shape[0],64)),
                 nn.ReLU(),
-                init(nn.Linear(400,self.feature_out_unit))
+                init(nn.Linear(64,self.feature_out_unit))
             )
-        
-        self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
+        if self.env_iscontinuous:
+            self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
+        else:
+            self.action_out = nn.Linear(1, self.a_out_unit)
 
         self.advantage = nn.Sequential(
-            init(nn.Linear(self.concat_unit, 128)),
+            init(nn.Linear(self.concat_unit, 64)),
             nn.ReLU(),
-            init(nn.Linear(128, 1))
+            init(nn.Linear(64, 1))
         )
 
         self.value = nn.Sequential(
-            init(nn.Linear(self.concat_unit, 128)),
+            init(nn.Linear(self.concat_unit, 64)),
             nn.ReLU(),
-            init(nn.Linear(128, 1))
+            init(nn.Linear(64, 1))
         )
 
     def forward(self, x):
@@ -210,8 +212,11 @@ class Q_Network(nn.Module):
 
     
     def act(self, state, a_mu, epsilon):
-            a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
-            a_feature = a_mu.reshape(-1, self.num_actions)
+            if self.env_iscontinuous:
+                a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
+                a_feature = a_mu.reshape(-1, self.num_actions)
+            else:
+                a_feature = a_mu.reshape(-1,1).float()
             a_out = self.action_out(a_feature).reshape(-1,self.total_sample, self.a_out_unit)
             q_f = torch.cat(self.total_sample*[self.q_feature(state)]).reshape(-1, self.total_sample, self.feature_out_unit)
             x = torch.cat([a_out,q_f],dim=2)
@@ -240,11 +245,9 @@ class Proposal_Network(nn.Module):
             self.num_actions = env.action_space.n
         
         self.dist_feature = nn.Sequential(
-                init(nn.Linear(128,300)),
+                init(nn.Linear(128,128)),
                 nn.ReLU(),
-                init(nn.Linear(300,200)),
-                nn.ReLU(),
-                init(nn.Linear(200,self.num_actions))
+                init(nn.Linear(128,self.num_actions))
             )
         self.action_var = torch.full((self.num_actions,), action_var)
         if self.env_iscontinuous:
@@ -260,7 +263,9 @@ class Proposal_Network(nn.Module):
                 a_mu = torch.cat([a_uniform,a_dist],dim=1)
             else:  # discrete
                 dist = Categorical(logits=mu)
-                a_mu = dist.sample([self.num_actions])
+                a_dist = dist.sample([self.propose_sample]).reshape(mu.shape[0],self.propose_sample)
+                a_uniform = torch.randint(0,self.num_actions,size=(mu.shape[0],self.uniform_sample))
+                a_mu = torch.cat([a_uniform,a_dist],dim=1)
 
             return a_mu
 

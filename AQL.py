@@ -14,7 +14,7 @@ from memory import CustomPrioritizedReplayBuffer_AQL
 from tensorboardX import SummaryWriter
 
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4, 
+    def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4, 
                     epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4,
                     batch_size = 32, gamma = 0.99, target_update_interval=2500, save_interval = 1e4,
                     propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8):
@@ -151,9 +151,9 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = True
+training = False
 if __name__ == "__main__":
-    env_id = "MountainCarContinuous-v0"
+    env_id = "MountainCar-v0"
 
     test = train_DQN(env_id=env_id)
     if training:
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     else:
         # test.device = "cpu"
         # test.model.to("cpu")
-        test.load_model(80000)
+        test.load_model(20)
         for i in range(10):
             # test.env.render()
             s = test.env.reset()
