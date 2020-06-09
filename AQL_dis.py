@@ -15,10 +15,10 @@ from tensorboardX import SummaryWriter
 from batchrecoder_AQL import BatchRecorder
 import copy
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e3, prior_alpha = 0.6, prior_beta_start = 0.4,
+    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4,
                     publish_param_interval=10,
-                    batch_size = 32, gamma = 0.99, target_update_interval=10, save_interval = 20,
-                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=10):
+                    batch_size = 32, gamma = 0.99, target_update_interval=10, save_interval = 200,
+                    propose_sample=1, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -51,8 +51,8 @@ class train_DQN():
                                         action_var = action_var, device = self.device)
 
         # decay function
-        self.scheduler_q = optim.lr_scheduler.StepLR(self.optimizer_q,step_size=100,gamma=0.95)
-        self.scheduler_proposal = optim.lr_scheduler.StepLR(self.optimizer_proposal,step_size=100,gamma=0.95)
+        self.scheduler_q = optim.lr_scheduler.StepLR(self.optimizer_q,step_size=100,gamma=0.99)
+        self.scheduler_proposal = optim.lr_scheduler.StepLR(self.optimizer_proposal,step_size=100,gamma=0.99)
 
         self.beta_by_frame = lambda frame_idx: min(1.0, self.prior_beta_start + frame_idx * (1.0 - self.prior_beta_start) / self.max_step*self.n_workers)
         
@@ -80,7 +80,7 @@ class train_DQN():
         td_error = torch.abs(expected_q_value.detach() - q_value)
         
         loss_q  = (td_error).pow(2) * weights
-        prios = 0.9 * torch.max(td_error)+0.1*td_error+1e-5
+        prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
         loss_q  = loss_q.mean()
         
 
@@ -94,13 +94,13 @@ class train_DQN():
         loss_p = torch.mean(loss_p)
         self.optimizer_proposal.zero_grad()
         loss_p.backward()
-        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
+        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
         self.scheduler_proposal.step()
         self.optimizer_proposal.step()
 
         self.optimizer_q.zero_grad()
         loss_q.backward()
-        # torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
+        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
         
         self.replay_buffer.update_priorities(indices, prios.data.cpu().numpy())
         self.optimizer_q.step()
@@ -139,9 +139,9 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = False
+training = True
 if __name__ == "__main__":
-    env_id = "MountainCar-v0"
+    env_id = "CartPole-v0"
 
     test = train_DQN(env_id=env_id)
     if training:

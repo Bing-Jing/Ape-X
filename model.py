@@ -117,17 +117,21 @@ class AQL(nn.Module):
         self.env = env
         self.input_shape = self.env.observation_space.shape
         self.env_iscontinuous = isinstance(self.env.action_space, gym.spaces.Box)
-        self.total_sample = propose_sample+uniform_sample
+        
         if self.env_iscontinuous:
             self.num_actions = env.action_space.shape[0]
         else:
+            if uniform_sample > env.action_space.n:
+                self.uniform_sample = env.action_space.n
+            else:
+                self.uniform_sample = uniform_sample
             self.num_actions = env.action_space.n
-
+        self.total_sample = propose_sample+self.uniform_sample
         self.q = Q_Network(input_shape = self.input_shape, num_actions= self.num_actions, total_sample = self.total_sample,
                             env_iscontinuous = self.env_iscontinuous)
         
         self.proposal = Proposal_Network(self.env, propose_sample=propose_sample,
-                            uniform_sample = uniform_sample, action_var = action_var, device=self.device)
+                            uniform_sample = self.uniform_sample, action_var = action_var, device=self.device)
 
     def forward(self, state, a_mu):
 
@@ -203,7 +207,7 @@ class Q_Network(nn.Module):
             x = x.reshape(-1,self.concat_unit)
             advantage = self.advantage(x)
             value = self.value(x)
-            return value + advantage - advantage.mean(1, keepdim=True)
+            return value #+ advantage - advantage.mean(1, keepdim=True)
 
     def embedding_feature(self, x):
             x = self.features(x)
@@ -264,7 +268,8 @@ class Proposal_Network(nn.Module):
             else:  # discrete
                 dist = Categorical(logits=mu)
                 a_dist = dist.sample([self.propose_sample]).reshape(mu.shape[0],self.propose_sample)
-                a_uniform = torch.randint(0,self.num_actions,size=(mu.shape[0],self.uniform_sample))
+                a_uniform = np.random.choice(torch.arange(self.num_actions),size=self.uniform_sample,replace=False)
+                a_uniform = torch.LongTensor(a_uniform).reshape(mu.shape[0],self.uniform_sample)
                 a_mu = torch.cat([a_uniform,a_dist],dim=1)
 
             return a_mu

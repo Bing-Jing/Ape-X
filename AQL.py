@@ -151,7 +151,7 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = False
+training = True
 if __name__ == "__main__":
     env_id = "MountainCar-v0"
 
