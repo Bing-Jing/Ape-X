@@ -41,6 +41,26 @@ def png2array(png):
     return rgb_array
 
 
+def compute_loss_AQL(model, tgt_model, batch, n_steps, gamma=0.99):
+    states, actions, rewards, next_states, dones, a_mu, weights = batch
+
+    q_values = model(states,a_mu)
+    next_q_values = model(next_states,a_mu)
+    tgt_next_q_values = tgt_model(next_states,a_mu)
+
+    q_a_values = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+    next_actions = next_q_values.max(1)[1].unsqueeze(1)
+    next_q_a_values = tgt_next_q_values.gather(1, next_actions).squeeze(1)
+    expected_q_a_values = rewards + (gamma ** n_steps) * next_q_a_values * (1 - dones)
+
+    td_error = torch.abs(expected_q_a_values.detach() - q_a_values)
+    prios = (0.9*torch.max(td_error)+0.1*td_error + 1e-6).data.cpu().numpy()
+
+    loss = torch.where(td_error < 1, 0.5 * td_error ** 2, td_error - 0.5)
+    loss = (loss * weights).mean()
+    return loss, prios
+    
+    
 def compute_loss(model, tgt_model, batch, n_steps, gamma=0.99):
     states, actions, rewards, next_states, dones, weights = batch
 

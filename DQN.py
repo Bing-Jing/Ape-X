@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from model import DuelingDQN
 from memory import PrioritizedReplayBuffer
 from tensorboardX import SummaryWriter
-
+import utils
 class train_DQN():
     def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4, 
                     epsilon_start = 1.0, epsilon_final = 0.01, epsilon_decay = 500,
@@ -51,23 +51,25 @@ class train_DQN():
         reward     = torch.FloatTensor(reward).to(self.device)
         done       = torch.FloatTensor(done).to(self.device)
         weights    = torch.FloatTensor(weights).to(self.device)
+        batch = (state, action, reward, next_state, done, weights)
 
-        q_values      = self.model(state)
-        next_q_values = self.target_model(next_state)
+        # q_values      = self.model(state)
+        # next_q_values = self.target_model(next_state)
 
-        q_value          = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
-        next_q_value     = next_q_values.max(1)[0]
-        expected_q_value = reward + self.gamma * next_q_value * (1 - done)
+        # q_value          = q_values.gather(1, action.unsqueeze(1)).squeeze(1)
+        # next_q_value     = next_q_values.max(1)[0]
+        # expected_q_value = reward + self.gamma * next_q_value * (1 - done)
         
-        td_error = torch.abs(expected_q_value.detach() - q_value)
-        loss  = (td_error).pow(2) * weights
-        prios = loss+1e-5#0.9 * torch.max(td_error)+(1-0.9)*td_error
-        loss  = loss.mean()
+        # td_error = torch.abs(expected_q_value.detach() - q_value)
+        # loss  = (td_error).pow(2) * weights
+        # prios = loss+1e-5#0.9 * torch.max(td_error)+(1-0.9)*td_error
+        # loss  = loss.mean()
+        loss, prios = utils.compute_loss(self.model,self.target_model, batch,1)
             
         self.optimizer.zero_grad()
         loss.backward()
         self.scheduler.step()
-        self.replay_buffer.update_priorities(indices, prios.data.cpu().numpy())
+        self.replay_buffer.update_priorities(indices, prios)
         self.optimizer.step()
         return loss    
     def train(self):
@@ -119,9 +121,9 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = False
+training = True
 if __name__ == "__main__":
-    env_id = "MountainCar-v0"
+    env_id ="CartPole-v0"
 
     test = train_DQN(env_id=env_id)
     if training:

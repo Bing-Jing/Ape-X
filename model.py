@@ -120,6 +120,7 @@ class AQL(nn.Module):
         
         if self.env_iscontinuous:
             self.num_actions = env.action_space.shape[0]
+            self.uniform_sample = uniform_sample
         else:
             if uniform_sample > env.action_space.n:
                 self.uniform_sample = env.action_space.n
@@ -128,7 +129,7 @@ class AQL(nn.Module):
             self.num_actions = env.action_space.n
         self.total_sample = propose_sample+self.uniform_sample
         self.q = Q_Network(input_shape = self.input_shape, num_actions= self.num_actions, total_sample = self.total_sample,
-                            env_iscontinuous = self.env_iscontinuous)
+                            env_iscontinuous = self.env_iscontinuous, device=device)
         
         self.proposal = Proposal_Network(self.env, propose_sample=propose_sample,
                             uniform_sample = self.uniform_sample, action_var = action_var, device=self.device)
@@ -140,7 +141,7 @@ class AQL(nn.Module):
 
     def act(self, state, epsilon):
         with torch.no_grad():
-            state = torch.FloatTensor(state)
+            state = torch.FloatTensor(state).to(self.device)
             x = self.q.embedding_feature(state)
             a_mu = self.proposal.forward(x)
 
@@ -148,8 +149,9 @@ class AQL(nn.Module):
             return action, a_mu.cpu().numpy(), q_values
 
 class Q_Network(nn.Module):
-    def __init__(self, input_shape, num_actions, total_sample, env_iscontinuous):
+    def __init__(self, input_shape, num_actions, total_sample, env_iscontinuous,device):
         super(Q_Network, self).__init__()
+        self.device = device
 
         self.input_shape = input_shape
         self.total_sample = total_sample
@@ -184,48 +186,105 @@ class Q_Network(nn.Module):
         self.q_feature = nn.Sequential(
                 init(nn.Linear(self.input_shape[0],64)),
                 nn.ReLU(),
-                init(nn.Linear(64,self.feature_out_unit))
+                init(nn.Linear(64,self.feature_out_unit)),
+                nn.ReLU()
             )
         if self.env_iscontinuous:
-            self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
+            # self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
+            self.action_out = nn.Sequential(
+                    nn.Linear(self.total_sample*self.num_actions, self.a_out_unit),
+                    nn.ReLU(),
+            )
         else:
-            self.action_out = nn.Linear(1, self.a_out_unit)
+            self.action_out = nn.Sequential(
+                nn.Linear(self.total_sample, self.a_out_unit),
+                nn.ReLU(),
+            )
+        self.concat_out = nn.Sequential(
+                nn.Linear(self.concat_unit, 64),
+                nn.ReLU(),
+            )
+        # if env_iscontinuous:
+        #     self.advantage = nn.Sequential(
+        #         init(nn.Linear(self.concat_unit, 64)),
+        #         nn.ReLU(),
+        #         init(nn.Linear(64, 1))
+        #     )
 
+        #     self.value = nn.Sequential(
+        #         init(nn.Linear(self.feature_out_unit, 64)),
+        #         nn.ReLU(),
+        #         init(nn.Linear(64, 1))
+        #     )
+        # else:
         self.advantage = nn.Sequential(
-            init(nn.Linear(self.concat_unit, 64)),
+            init(nn.Linear(64, 64)),
             nn.ReLU(),
-            init(nn.Linear(64, 1))
+            init(nn.Linear(64, self.total_sample))
         )
 
         self.value = nn.Sequential(
-            init(nn.Linear(self.concat_unit, 64)),
+            init(nn.Linear(64, 64)),
             nn.ReLU(),
             init(nn.Linear(64, 1))
         )
 
     def forward(self, x):
             x = x.reshape(-1,self.concat_unit)
+            x = self.concat_out(x)
             advantage = self.advantage(x)
             value = self.value(x)
-            return value #+ advantage - advantage.mean(1, keepdim=True)
+            return value + advantage - advantage.mean(1, keepdim=True)
 
     def embedding_feature(self, x):
             x = self.features(x)
             x = x.reshape(-1,128)
             return x
+    # def compute_Q(self, a_out, q_f):
+    #     advantages = []
+    #     for i in range(self.total_sample):
+    #         tmp_a = a_out[i].reshape(-1,self.a_out_unit)
+    #         x = torch.cat([tmp_a,q_f],dim=1) # 32,128
+    #         x = F.relu(x)
+    #         x = self.advantage(x).cpu().detach().numpy()
+    #         advantages.append(x)
+    #     advantages = torch.FloatTensor(advantages).reshape(-1,self.total_sample).to(self.device)
+    #     # print(advantages.shape)
+    #     v = self.value(q_f)
+    #     # print(v.shape)
+    #     return v + advantages - advantages.mean(1, keepdim=True)
 
     
     def act(self, state, a_mu, epsilon):
+            # print(a_mu.shape)
             if self.env_iscontinuous:
+                ### ver 1
+                # a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
+                # a_feature = a_mu.reshape(-1,self.num_actions)
+                # a_out = self.action_out(a_feature).reshape(self.total_sample,-1,  self.a_out_unit)#200,32,64
+                # q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)#32,64
+                # q_values = self.compute_Q(a_out,q_f)
+
+                ### ver2
                 a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
-                a_feature = a_mu.reshape(-1, self.num_actions)
+                a_feature = a_mu.reshape(-1,self.total_sample*self.num_actions)
+                a_out = self.action_out(a_feature).reshape(-1, self.a_out_unit)
+                q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)
+                # print(q_f.shape,a_out.shape)
+                x = torch.cat([a_out,q_f],dim=1)#32,128
+                q_values = self.forward(x).reshape(a_mu.shape[0], self.total_sample)
+                # print(q_values.shape)
+                
             else:
-                a_feature = a_mu.reshape(-1,1).float()
-            a_out = self.action_out(a_feature).reshape(-1,self.total_sample, self.a_out_unit)
-            q_f = torch.cat(self.total_sample*[self.q_feature(state)]).reshape(-1, self.total_sample, self.feature_out_unit)
-            x = torch.cat([a_out,q_f],dim=2)
-            x = F.relu(x)
-            q_values = self.forward(x).reshape(a_mu.shape[0], self.total_sample)
+                a_feature = a_mu.reshape(-1,self.total_sample).float()
+                a_out = self.action_out(a_feature).reshape(-1, self.a_out_unit)
+                # print(a_out.shape)
+                q_f = self.q_feature(state).reshape(-1,self.feature_out_unit)
+                # print(q_f.shape)
+                # q_f = torch.cat(self.total_sample*[self.q_feature(state)]).reshape(-1, self.total_sample, self.feature_out_unit)
+                x = torch.cat([a_out,q_f],dim=1)
+                x = F.relu(x)
+                q_values = self.forward(x).reshape(a_mu.shape[0], self.total_sample)
             # print(q_values.shape)
             if random.random() > epsilon:
                 idx = torch.argmax(q_values,dim=1)
@@ -258,18 +317,18 @@ class Proposal_Network(nn.Module):
             self.uniform = uniform.Uniform(torch.Tensor(self.env.action_space.low),torch.Tensor(self.env.action_space.high))
 
     def forward(self,embed_state):
-            mu = self.dist_feature(embed_state)
+            mu = self.dist_feature(embed_state).to(self.device)
             if self.env_iscontinuous: # continuous
-                cov_mat = torch.diag(self.action_var)
+                cov_mat = torch.diag(self.action_var).to(self.device)
                 dist = MultivariateNormal(mu, cov_mat)
-                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample])
+                a_uniform = self.uniform.sample([mu.shape[0],self.uniform_sample]).to(self.device)
                 a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions))
                 a_mu = torch.cat([a_uniform,a_dist],dim=1)
             else:  # discrete
                 dist = Categorical(logits=mu)
                 a_dist = dist.sample([self.propose_sample]).reshape(mu.shape[0],self.propose_sample)
                 a_uniform = np.random.choice(torch.arange(self.num_actions),size=self.uniform_sample,replace=False)
-                a_uniform = torch.LongTensor(a_uniform).reshape(mu.shape[0],self.uniform_sample)
+                a_uniform = torch.LongTensor(a_uniform).reshape(mu.shape[0],self.uniform_sample).to(self.device)
                 a_mu = torch.cat([a_uniform,a_dist],dim=1)
 
             return a_mu

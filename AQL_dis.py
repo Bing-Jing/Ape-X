@@ -15,10 +15,10 @@ from tensorboardX import SummaryWriter
 from batchrecoder_AQL import BatchRecorder
 import copy
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4,
+    def __init__(self, env_id, max_step = 1e4, prior_alpha = 0.6, prior_beta_start = 0.4,
                     publish_param_interval=10,
-                    batch_size = 32, gamma = 0.99, target_update_interval=10, save_interval = 200,
-                    propose_sample=1, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=10):
+                    batch_size = 32, gamma = 0.99, target_update_interval=5, save_interval = 200,
+                    propose_sample=1, uniform_sample = 2, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -114,7 +114,7 @@ class train_DQN():
             self.recoder.set_worker_weights(copy.deepcopy(self.model))
             
             total_ep = self.recoder.record_batch()
-            for _ in range(total_ep//self.batch_size):
+            for _ in range(5):
                 
                 if len(self.replay_buffer) > self.batch_size:
                     beta = self.beta_by_frame(frame_idx)
@@ -147,13 +147,12 @@ if __name__ == "__main__":
     if training:
         test.train()
     else:
-        # test.device = "cpu"
-        # test.model.to("cpu")
-        test.load_model(20)
+        test.device = "cpu"
+        test.model.to("cpu")
+        test.load_model(17400)
         for i in range(10):
             test.env.render()
             s = test.env.reset()
-            s = torch.FloatTensor(s).to(test.device)
             er = 0
             d = False
             while True:
@@ -161,9 +160,9 @@ if __name__ == "__main__":
                 a, a_mu,_ = test.model.act(s, epsilon=0)
                 s, r, d, _ = test.env.step(a_mu[0][a])
                 er+=r
-                s = torch.FloatTensor(s).to(test.device)
                 if d:
                     print(er)
                     break
+        test.recoder.cleanup()
         test.env.close()
     

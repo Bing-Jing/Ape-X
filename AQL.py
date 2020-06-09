@@ -12,12 +12,13 @@ import torch.nn.functional as F
 from model import AQL
 from memory import CustomPrioritizedReplayBuffer_AQL
 from tensorboardX import SummaryWriter
+import utils
 
 class train_DQN():
     def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4, 
                     epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4,
-                    batch_size = 32, gamma = 0.99, target_update_interval=2500, save_interval = 1e4,
-                    propose_sample=100, uniform_sample = 400, action_var = 0.25, ent_lam = 0.8):
+                    batch_size = 32, gamma = 0.99, target_update_interval=1000, save_interval = 1e4,
+                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -61,21 +62,23 @@ class train_DQN():
         done       = torch.FloatTensor(done).to(self.device)
         weights    = torch.FloatTensor(weights).to(self.device)
         a_mu       = torch.FloatTensor(a_mu).to(self.device)
-        reward = ((reward - reward.mean()) / (reward.std() + 1e-5))*2 -1
+        # reward = ((reward - reward.mean()) / (reward.std() + 1e-5))*2 -1
+        batch = (state, action, reward, next_state, done, a_mu, weights)
 
         
         q_values      = self.model(state, a_mu)
-        next_q_values = self.target_model(next_state, a_mu)
-        q_value = q_values[torch.arange(batch_size), action].to(self.device)
+        # next_q_values = self.target_model(next_state, a_mu)
+        # q_value = q_values[torch.arange(batch_size), action].to(self.device)
         
-        next_q_value     = next_q_values.max(1)[0].to(self.device)
-        expected_q_value = reward + self.gamma * next_q_value * (1 - done)
+        # next_q_value     = next_q_values.max(1)[0].to(self.device)
+        # expected_q_value = reward + self.gamma * next_q_value * (1 - done)
         
-        td_error = torch.abs(expected_q_value.detach() - q_value)
+        # td_error = torch.abs(expected_q_value.detach() - q_value)
         
-        loss_q  = (td_error).pow(2) * weights
-        prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
-        loss_q  = loss_q.mean()
+        # loss_q  = (td_error).pow(2) * weights
+        # prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
+        # loss_q  = loss_q.mean()
+        loss_q, prios = utils.compute_loss_AQL(self.model, self.target_model, batch, n_steps=1,gamma=self.gamma)
         
 
         embed_state = self.model.q.embedding_feature(state)
@@ -88,15 +91,16 @@ class train_DQN():
         loss_p = torch.mean(loss_p)
         self.optimizer_proposal.zero_grad()
         loss_p.backward()
-        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
-        self.scheduler_proposal.step()
+        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
+        
         self.optimizer_proposal.step()
+        self.scheduler_proposal.step()
 
         self.optimizer_q.zero_grad()
         loss_q.backward()
-        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
+        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
         
-        self.replay_buffer.update_priorities(indices, prios.data.cpu().numpy())
+        self.replay_buffer.update_priorities(indices, prios)
         self.optimizer_q.step()
         self.scheduler_q.step()
         # self.update_target(self.model.proposal, self.target_model.proposal)
@@ -111,7 +115,7 @@ class train_DQN():
             # epsilon = self.epsilon_by_frame(frame_idx)
             epsilon = 0.5 if random.random() > 0.1 else 0.05 # 10% actor epsilon = 0.5
 
-            action, a_mu, _ = self.model.act(torch.FloatTensor((state)).to(self.device), epsilon)
+            action, a_mu, _ = self.model.act((state), epsilon)
             a_mu = a_mu[0]
             next_state, reward, done, _ = self.env.step(a_mu[action])
             self.replay_buffer.add(state, action, reward, next_state, done, a_mu)
@@ -153,7 +157,7 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "MountainCar-v0"
+    env_id = "LunarLanderContinuous-v2"
 
     test = train_DQN(env_id=env_id)
     if training:
