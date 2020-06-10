@@ -373,7 +373,7 @@ class CustomPrioritizedReplayBuffer_AQL(PrioritizedReplayBuffer):
             self._storage.append(data)
         else:
             self._storage[self._next_idx] = data
-        self._next_idx = (self._next_idx + 1) % self._maxsize
+        self._next_idx = int((self._next_idx + 1) % self._maxsize)
         self._it_sum[idx] = self._max_priority ** self._alpha
         self._it_min[idx] = self._max_priority ** self._alpha
 

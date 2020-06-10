@@ -157,7 +157,7 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "LunarLanderContinuous-v2"
+    env_id = "CartPole-v0"
 
     test = train_DQN(env_id=env_id)
     if training:

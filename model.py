@@ -200,10 +200,10 @@ class Q_Network(nn.Module):
                 nn.Linear(self.total_sample, self.a_out_unit),
                 nn.ReLU(),
             )
-        self.concat_out = nn.Sequential(
-                nn.Linear(self.concat_unit, 64),
-                nn.ReLU(),
-            )
+        # self.concat_out = nn.Sequential(
+        #         nn.Linear(self.concat_unit, 64),
+        #         nn.ReLU(),
+        #     )
         # if env_iscontinuous:
         #     self.advantage = nn.Sequential(
         #         init(nn.Linear(self.concat_unit, 64)),
@@ -218,23 +218,23 @@ class Q_Network(nn.Module):
         #     )
         # else:
         self.advantage = nn.Sequential(
-            init(nn.Linear(64, 64)),
+            init(nn.Linear(self.concat_unit, 64)),
             nn.ReLU(),
             init(nn.Linear(64, self.total_sample))
         )
 
         self.value = nn.Sequential(
-            init(nn.Linear(64, 64)),
+            init(nn.Linear(self.feature_out_unit, 64)),
             nn.ReLU(),
             init(nn.Linear(64, 1))
         )
 
-    def forward(self, x):
+    def forward(self, x,q_f):
             x = x.reshape(-1,self.concat_unit)
-            x = self.concat_out(x)
+            # x = self.concat_out(x)
             advantage = self.advantage(x)
-            value = self.value(x)
-            return value + advantage - advantage.mean(1, keepdim=True)
+            value = self.value(q_f)
+            return advantage + value - advantage.mean(1, keepdim=True)
 
     def embedding_feature(self, x):
             x = self.features(x)
@@ -272,7 +272,7 @@ class Q_Network(nn.Module):
                 q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)
                 # print(q_f.shape,a_out.shape)
                 x = torch.cat([a_out,q_f],dim=1)#32,128
-                q_values = self.forward(x).reshape(a_mu.shape[0], self.total_sample)
+                q_values = self.forward(x,q_f).reshape(a_mu.shape[0], self.total_sample)
                 # print(q_values.shape)
                 
             else:
@@ -281,10 +281,9 @@ class Q_Network(nn.Module):
                 # print(a_out.shape)
                 q_f = self.q_feature(state).reshape(-1,self.feature_out_unit)
                 # print(q_f.shape)
-                # q_f = torch.cat(self.total_sample*[self.q_feature(state)]).reshape(-1, self.total_sample, self.feature_out_unit)
                 x = torch.cat([a_out,q_f],dim=1)
                 x = F.relu(x)
-                q_values = self.forward(x).reshape(a_mu.shape[0], self.total_sample)
+                q_values = self.forward(x,q_f).reshape(a_mu.shape[0], self.total_sample)
             # print(q_values.shape)
             if random.random() > epsilon:
                 idx = torch.argmax(q_values,dim=1)

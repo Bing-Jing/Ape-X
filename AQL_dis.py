@@ -14,11 +14,12 @@ from memory import CustomPrioritizedReplayBuffer_AQL
 from tensorboardX import SummaryWriter
 from batchrecoder_AQL import BatchRecorder
 import copy
+import utils
 class train_DQN():
     def __init__(self, env_id, max_step = 1e4, prior_alpha = 0.6, prior_beta_start = 0.4,
-                    publish_param_interval=10,
-                    batch_size = 32, gamma = 0.99, target_update_interval=5, save_interval = 200,
-                    propose_sample=1, uniform_sample = 2, action_var = 0.25, ent_lam = 0.8, n_workers=10):
+                    publish_param_interval=10, device = "cuda:0",
+                    batch_size = 32, gamma = 0.99, target_update_interval=20, save_interval = 200,
+                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -30,7 +31,7 @@ class train_DQN():
         self.lr = 1e-3
         self.n_workers = n_workers
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.env = gym.make(env_id)
         self.model = AQL(env = self.env, propose_sample=propose_sample, uniform_sample = uniform_sample,
                              action_var = action_var, device=self.device).to(self.device)
@@ -68,20 +69,22 @@ class train_DQN():
         weights    = torch.FloatTensor(weights).to(self.device)
         a_mu       = torch.FloatTensor(a_mu).to(self.device)
         # reward = ((reward - reward.mean()) / (reward.std() + 1e-5))*2 -1
+        batch = (state, action, reward, next_state, done, a_mu, weights)
 
         
         q_values      = self.model(state, a_mu)
-        next_q_values = self.target_model(next_state, a_mu)
-        q_value = q_values[torch.arange(batch_size), action].to(self.device)
+        # next_q_values = self.target_model(next_state, a_mu)
+        # q_value = q_values[torch.arange(batch_size), action].to(self.device)
         
-        next_q_value     = next_q_values.max(1)[0].to(self.device)
-        expected_q_value = reward + self.gamma * next_q_value * (1 - done)
+        # next_q_value     = next_q_values.max(1)[0].to(self.device)
+        # expected_q_value = reward + self.gamma * next_q_value * (1 - done)
         
-        td_error = torch.abs(expected_q_value.detach() - q_value)
+        # td_error = torch.abs(expected_q_value.detach() - q_value)
         
-        loss_q  = (td_error).pow(2) * weights
-        prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
-        loss_q  = loss_q.mean()
+        # loss_q  = (td_error).pow(2) * weights
+        # prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
+        # loss_q  = loss_q.mean()
+        loss_q, prios = utils.compute_loss_AQL(self.model, self.target_model, batch, n_steps=1,gamma=self.gamma)
         
 
         embed_state = self.model.q.embedding_feature(state)
@@ -95,14 +98,15 @@ class train_DQN():
         self.optimizer_proposal.zero_grad()
         loss_p.backward()
         torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
-        self.scheduler_proposal.step()
+        
         self.optimizer_proposal.step()
+        self.scheduler_proposal.step()
 
         self.optimizer_q.zero_grad()
         loss_q.backward()
         torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
         
-        self.replay_buffer.update_priorities(indices, prios.data.cpu().numpy())
+        self.replay_buffer.update_priorities(indices, prios)
         self.optimizer_q.step()
         self.scheduler_q.step()
         # self.update_target(self.model.proposal, self.target_model.proposal)
@@ -114,7 +118,7 @@ class train_DQN():
             self.recoder.set_worker_weights(copy.deepcopy(self.model))
             
             total_ep = self.recoder.record_batch()
-            for _ in range(5):
+            for _ in range(total_ep//self.batch_size):
                 
                 if len(self.replay_buffer) > self.batch_size:
                     beta = self.beta_by_frame(frame_idx)
@@ -141,22 +145,23 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "CartPole-v0"
-
-    test = train_DQN(env_id=env_id)
+    env_id = "LunarLander-v2"
+   
     if training:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        test = train_DQN(env_id=env_id,device=device)
         test.train()
     else:
-        test.device = "cpu"
-        test.model.to("cpu")
-        test.load_model(17400)
+        device = torch.device("cpu")
+        test = train_DQN(env_id=env_id,device=device)
+        test.load_model(1600)
         for i in range(10):
-            test.env.render()
+            # test.env.render()
             s = test.env.reset()
             er = 0
             d = False
             while True:
-                # test.env.render(mode='rgb_array')
+                test.env.render(mode='rgb_array')
                 a, a_mu,_ = test.model.act(s, epsilon=0)
                 s, r, d, _ = test.env.step(a_mu[0][a])
                 er+=r
