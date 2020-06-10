@@ -1,7 +1,7 @@
 import math, random
 
 import gym
-import pybulletgym
+# import pybulletgym
 import numpy as np
 
 import torch
@@ -16,10 +16,10 @@ from batchrecoder_AQL import BatchRecorder
 import copy
 import utils
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e4, prior_alpha = 0.6, prior_beta_start = 0.4,
-                    publish_param_interval=10, device = "cuda:0",
+    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4,
+                    publish_param_interval=5, device = "cuda:0",
                     batch_size = 32, gamma = 0.99, target_update_interval=20, save_interval = 200,
-                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=10):
+                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=30):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -145,7 +145,7 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "LunarLander-v2"
+    env_id = "LunarLander-v2"#"MountainCar-v0"#"CartPole-v0"
    
     if training:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

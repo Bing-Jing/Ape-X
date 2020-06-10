@@ -97,7 +97,7 @@ class BatchRecorder():
         for i in range(self.n_workers):
             self.workers.append(
                 Worker(worker_id=i, env_id=self.env_id, seed=self.env_seed+i, 
-                        epsilon= 0.5 if i < n_workers//3 else 0.05, 
+                        epsilon= 0.4 ** (1 + i / (self.n_workers - 1) * 7),#0.8 if i < n_workers//3 else 0.05, 
                         max_episode_length=max_episode_length,
                         task_queue=self.task_queue, buffer=self.res_queue,
                         propose_sample=propose_sample, uniform_sample = uniform_sample, 
