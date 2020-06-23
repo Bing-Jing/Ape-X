@@ -18,7 +18,7 @@ class train_DQN():
     def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4, 
                     epsilon_start = 1, epsilon_final = 0.01, epsilon_decay = 1e4,
                     batch_size = 32, gamma = 0.99, target_update_interval=1000, save_interval = 1e4,
-                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8):
+                    propose_sample=50, uniform_sample = 50, action_var = 0.25, ent_lam = 0.8):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -155,9 +155,9 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = True
+training = False
 if __name__ == "__main__":
-    env_id = "CartPole-v0"
+    env_id = "BipedalWalker-v3"#"LunarLanderContinuous-v2"#"CartPole-v0"
 
     test = train_DQN(env_id=env_id)
     if training:
@@ -165,11 +165,10 @@ if __name__ == "__main__":
     else:
         # test.device = "cpu"
         # test.model.to("cpu")
-        test.load_model(20)
+        test.load_model(9800)
         for i in range(10):
             # test.env.render()
             s = test.env.reset()
-            s = torch.FloatTensor(s).to(test.device)
             er = 0
             d = False
             while True:
@@ -177,7 +176,6 @@ if __name__ == "__main__":
                 a, a_mu,_ = test.model.act(s, epsilon=0)
                 s, r, d, _ = test.env.step(a_mu[0][a])
                 er+=r
-                s = torch.FloatTensor(s).to(test.device)
                 if d:
                     print(er)
                     break

@@ -8,6 +8,8 @@ import numpy as np
 import gym
 from torch.distributions import Categorical, MultivariateNormal, uniform
 import torch.nn.functional as F
+import math
+from torch.autograd import Variable
 
 class DuelingDQN(nn.Module):
     """
@@ -107,6 +109,60 @@ def init(module):
 
 
 
+class NoisyLinear(nn.Module):
+    def __init__(self, in_features, out_features, device, std_init=0.4):
+        super(NoisyLinear, self).__init__()
+        
+        self.device     = device
+        self.in_features  = in_features
+        self.out_features = out_features
+        self.std_init     = std_init
+        
+        self.weight_mu    = nn.Parameter(torch.FloatTensor(out_features, in_features))
+        self.weight_sigma = nn.Parameter(torch.FloatTensor(out_features, in_features))
+        self.register_buffer('weight_epsilon', torch.FloatTensor(out_features, in_features))
+        
+        self.bias_mu    = nn.Parameter(torch.FloatTensor(out_features))
+        self.bias_sigma = nn.Parameter(torch.FloatTensor(out_features))
+        self.register_buffer('bias_epsilon', torch.FloatTensor(out_features))
+        
+        self.reset_parameters()
+        self.reset_noise()
+    
+    def forward(self, x):
+        weight_epsilon = self.weight_epsilon.to(self.device)
+        bias_epsilon   = self.bias_epsilon.to(self.device)
+            
+        if self.training: 
+            weight = self.weight_mu + self.weight_sigma.mul(Variable(weight_epsilon))
+            bias   = self.bias_mu   + self.bias_sigma.mul(Variable(bias_epsilon))
+        else:
+            weight = self.weight_mu
+            bias   = self.bias_mu
+        
+        return F.linear(x, weight, bias)
+    
+    def reset_parameters(self):
+        mu_range = 1 / math.sqrt(self.weight_mu.size(1))
+        
+        self.weight_mu.data.uniform_(-mu_range, mu_range)
+        self.weight_sigma.data.fill_(self.std_init / math.sqrt(self.weight_sigma.size(1)))
+        
+        self.bias_mu.data.uniform_(-mu_range, mu_range)
+        self.bias_sigma.data.fill_(self.std_init / math.sqrt(self.bias_sigma.size(0)))
+    
+    def reset_noise(self):
+        epsilon_in  = self._scale_noise(self.in_features)
+        epsilon_out = self._scale_noise(self.out_features)
+        
+        self.weight_epsilon.copy_(epsilon_out.ger(epsilon_in))
+        self.bias_epsilon.copy_(self._scale_noise(self.out_features))
+    
+    def _scale_noise(self, size):
+        x = torch.randn(size)
+        x = x.sign().mul(x.abs().sqrt())
+        return x
+
 
 ################################
 
@@ -192,7 +248,11 @@ class Q_Network(nn.Module):
         if self.env_iscontinuous:
             # self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
             self.action_out = nn.Sequential(
-                    nn.Linear(self.total_sample*self.num_actions, self.a_out_unit),
+                    nn.Linear(self.total_sample*self.num_actions, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, self.a_out_unit),
                     nn.ReLU(),
             )
         else:
@@ -217,23 +277,31 @@ class Q_Network(nn.Module):
         #         init(nn.Linear(64, 1))
         #     )
         # else:
-        self.advantage = nn.Sequential(
-            init(nn.Linear(self.concat_unit, 64)),
-            nn.ReLU(),
-            init(nn.Linear(64, self.total_sample))
-        )
+        # self.advantage = nn.Sequential(
+        #     init(nn.Linear(self.concat_unit, 64)),
+        #     nn.ReLU(),
+        #     init(nn.Linear(64, self.total_sample))
+        # )
 
-        self.value = nn.Sequential(
-            init(nn.Linear(self.feature_out_unit, 64)),
-            nn.ReLU(),
-            init(nn.Linear(64, 1))
-        )
+        # self.value = nn.Sequential(
+        #     init(nn.Linear(self.feature_out_unit, 64)),
+        #     nn.ReLU(),
+        #     init(nn.Linear(64, 1))
+        # )
+        self.value1 = NoisyLinear(self.feature_out_unit, 64, device=self.device)
+        self.value2 = NoisyLinear(64, 1, device=self.device)
+        
+        self.advantage1 = NoisyLinear(self.concat_unit, 64, device=self.device)
+        self.advantage2 = NoisyLinear(64, self.total_sample, device=self.device)
 
     def forward(self, x,q_f):
             x = x.reshape(-1,self.concat_unit)
             # x = self.concat_out(x)
-            advantage = self.advantage(x)
-            value = self.value(q_f)
+            advantage = self.advantage1(x)
+            advantage = self.advantage2(advantage)
+
+            value = self.value1(q_f)
+            value = self.value2(value)
             return advantage + value - advantage.mean(1, keepdim=True)
 
     def embedding_feature(self, x):
@@ -309,7 +377,8 @@ class Proposal_Network(nn.Module):
         self.dist_feature = nn.Sequential(
                 init(nn.Linear(128,128)),
                 nn.ReLU(),
-                init(nn.Linear(128,self.num_actions))
+                init(nn.Linear(128,self.num_actions)),
+                nn.Softmax(dim=1)
             )
         self.action_var = torch.full((self.num_actions,), action_var)
         if self.env_iscontinuous:
@@ -324,7 +393,7 @@ class Proposal_Network(nn.Module):
                 a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions))
                 a_mu = torch.cat([a_uniform,a_dist],dim=1)
             else:  # discrete
-                dist = Categorical(logits=mu)
+                dist = Categorical(mu)
                 a_dist = dist.sample([self.propose_sample]).reshape(mu.shape[0],self.propose_sample)
                 a_uniform = np.random.choice(torch.arange(self.num_actions),size=self.uniform_sample,replace=False)
                 a_uniform = torch.LongTensor(a_uniform).reshape(mu.shape[0],self.uniform_sample).to(self.device)

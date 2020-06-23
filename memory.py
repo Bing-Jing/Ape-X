@@ -365,7 +365,7 @@ class CustomPrioritizedReplayBuffer_AQL(PrioritizedReplayBuffer):
     def __init__(self, size, alpha):
         super(CustomPrioritizedReplayBuffer_AQL, self).__init__(size, alpha)
 
-    def add(self, obs_t, action, reward, obs_tp1, done, a_mu):
+    def add(self, obs_t, action, reward, obs_tp1, done, a_mu ,priority):
         idx = self._next_idx
         data = (obs_t, action, reward, obs_tp1, done, a_mu)
 
@@ -376,6 +376,7 @@ class CustomPrioritizedReplayBuffer_AQL(PrioritizedReplayBuffer):
         self._next_idx = int((self._next_idx + 1) % self._maxsize)
         self._it_sum[idx] = self._max_priority ** self._alpha
         self._it_min[idx] = self._max_priority ** self._alpha
+        self._max_priority = max(self._max_priority, priority)
 
     def _encode_sample(self, idxes):
         obses_t, actions, rewards, obses_tp1, dones, a_mus = [], [], [], [], [], []
@@ -408,11 +409,12 @@ class BatchStorage:
         self.dones = []
         self.q_values = []
         self.next_q_values = []
+        self.a_mus = []
 
         self.n_steps = n_steps
         self.gamma = gamma
 
-    def add(self, state, reward, action, done, q_values):
+    def add(self, state, reward, action, done, a_mu, q_values):
         if len(self.state_deque) == self.n_steps or done:
             t0_state = self.state_deque[0]
             t0_reward = self.multi_step_reward(*self.reward_deque, reward)
@@ -428,6 +430,7 @@ class BatchStorage:
             self.dones.append(done)
             self.q_values.append(t0_q_values)
             self.next_q_values.append(tp_n_q_values)
+            self.a_mus.append(a_mu)
 
         if done:
             self.state_deque.clear()
@@ -447,17 +450,20 @@ class BatchStorage:
         self.dones = []
         self.q_values = []
         self.next_q_values = []
+        self.a_mus = []
 
     def compute_priorities(self):
-        # TODO: Should I seperate this method from BatchStorage class?
         actions = np.array(self.actions, copy=False)
         rewards = np.array(self.rewards, copy=False)
         dones = np.array(self.dones, copy=False)
         q_values = np.stack(self.q_values)
         next_q_values = np.stack(self.next_q_values)
+        q_values = q_values.reshape(len(q_values),-1)
+        next_q_values = next_q_values.reshape(len(next_q_values),-1)
 
         q_a_values = q_values[(range(len(q_values)), actions)]
         next_q_a_values = next_q_values.max(1)
+        
         expected_q_a_values = rewards + (self.gamma ** self.n_steps) * next_q_a_values * (1 - dones)
         td_error = expected_q_a_values - q_a_values
         prios = np.abs(td_error) + 1e-6
@@ -465,7 +471,7 @@ class BatchStorage:
 
     def make_batch(self):
         prios = self.compute_priorities()
-        batch = [self.states, self.actions, self.rewards, self.next_states, self.dones]
+        batch = [self.states, self.actions, self.rewards, self.next_states, self.dones, self.a_mus]
         return batch, prios
 
     def multi_step_reward(self, *rewards):

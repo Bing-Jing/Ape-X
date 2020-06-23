@@ -16,10 +16,10 @@ from batchrecoder_AQL import BatchRecorder
 import copy
 import utils
 class train_DQN():
-    def __init__(self, env_id, max_step = 1e5, prior_alpha = 0.6, prior_beta_start = 0.4,
-                    publish_param_interval=5, device = "cuda:0",
-                    batch_size = 32, gamma = 0.99, target_update_interval=20, save_interval = 200,
-                    propose_sample=100, uniform_sample = 100, action_var = 0.25, ent_lam = 0.8, n_workers=30):
+    def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4,
+                    publish_param_interval=5, device = "cuda:0", n_steps=3,
+                    batch_size = 32, gamma = 0.997, target_update_interval=20, save_interval = 200,
+                    propose_sample=1, uniform_sample = 50, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -30,6 +30,7 @@ class train_DQN():
         self.ent_lam = ent_lam
         self.lr = 1e-3
         self.n_workers = n_workers
+        self.n_steps = n_steps
 
         self.device = device
         self.env = gym.make(env_id)
@@ -47,7 +48,7 @@ class train_DQN():
         
         self.writer = SummaryWriter(comment="-{}-learner".format(self.env.unwrapped.spec.id))
         self.recoder = BatchRecorder(env_id, env_seed=0, n_workers=n_workers, buffer=self.replay_buffer, 
-                                        max_episode_length=50000, writer=self.writer,
+                                        max_episode_length=50000, writer=self.writer, n_steps=n_steps, gamma=gamma,
                                         propose_sample=propose_sample, uniform_sample = uniform_sample, 
                                         action_var = action_var, device = self.device)
 
@@ -84,7 +85,6 @@ class train_DQN():
         # loss_q  = (td_error).pow(2) * weights
         # prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
         # loss_q  = loss_q.mean()
-        loss_q, prios = utils.compute_loss_AQL(self.model, self.target_model, batch, n_steps=1,gamma=self.gamma)
         
 
         embed_state = self.model.q.embedding_feature(state)
@@ -97,19 +97,21 @@ class train_DQN():
         loss_p = torch.mean(loss_p)
         self.optimizer_proposal.zero_grad()
         loss_p.backward()
-        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
+        # torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
         
         self.optimizer_proposal.step()
-        self.scheduler_proposal.step()
+        self.update_target(self.model.proposal, self.target_model.proposal)
+        # self.scheduler_proposal.step()
 
+        loss_q, prios = utils.compute_loss_AQL(self.model, self.target_model, batch, n_steps=self.n_steps,gamma=self.gamma)
         self.optimizer_q.zero_grad()
         loss_q.backward()
         torch.nn.utils.clip_grad.clip_grad_norm_(self.model.q.parameters(), 40)
         
         self.replay_buffer.update_priorities(indices, prios)
         self.optimizer_q.step()
-        self.scheduler_q.step()
-        # self.update_target(self.model.proposal, self.target_model.proposal)
+        # self.scheduler_q.step()
+
         
         return loss_q, loss_p
     def train(self):
@@ -118,7 +120,7 @@ class train_DQN():
             self.recoder.set_worker_weights(copy.deepcopy(self.model))
             
             total_ep = self.recoder.record_batch()
-            for _ in range(total_ep//self.batch_size):
+            for _ in range(total_ep//self.batch_size//2):
                 
                 if len(self.replay_buffer) > self.batch_size:
                     beta = self.beta_by_frame(frame_idx)
@@ -145,7 +147,7 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "LunarLander-v2"#"MountainCar-v0"#"CartPole-v0"
+    env_id = "MountainCar-v0"#"BipedalWalker-v3"#"LunarLanderContinuous-v2"#"LunarLander-v2"#"CartPole-v0""MountainCarContinuous-v0"#
    
     if training:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
