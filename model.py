@@ -203,6 +203,8 @@ class AQL(nn.Module):
 
             action, q_values = self.q.act(state, a_mu, epsilon)
             return action, a_mu.cpu().numpy(), q_values
+    def reset_noise(self):
+        self.q.reset_noise()
 
 class Q_Network(nn.Module):
     def __init__(self, input_shape, num_actions, total_sample, env_iscontinuous,device):
@@ -297,10 +299,10 @@ class Q_Network(nn.Module):
     def forward(self, x,q_f):
             x = x.reshape(-1,self.concat_unit)
             # x = self.concat_out(x)
-            advantage = self.advantage1(x)
+            advantage = F.relu(self.advantage1(x))
             advantage = self.advantage2(advantage)
 
-            value = self.value1(q_f)
+            value = F.relu(self.value1(q_f))
             value = self.value2(value)
             return advantage + value - advantage.mean(1, keepdim=True)
 
@@ -322,7 +324,12 @@ class Q_Network(nn.Module):
     #     # print(v.shape)
     #     return v + advantages - advantages.mean(1, keepdim=True)
 
-    
+    def reset_noise(self):
+        self.value1.reset_noise()
+        self.value2.reset_noise()
+        self.advantage1.reset_noise()
+        self.advantage2.reset_noise()
+
     def act(self, state, a_mu, epsilon):
             # print(a_mu.shape)
             if self.env_iscontinuous:

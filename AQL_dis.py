@@ -112,9 +112,14 @@ class train_DQN():
         self.optimizer_q.step()
         # self.scheduler_q.step()
 
+        self.model.reset_noise()
+        self.target_model.reset_noise()
+
         
         return loss_q, loss_p
     def train(self):
+        self.model.q.train()
+        self.target_model.q.train()
         learn_idx = 0
         for frame_idx in range(self.max_step):
             self.recoder.set_worker_weights(copy.deepcopy(self.model))
@@ -157,6 +162,7 @@ if __name__ == "__main__":
         device = torch.device("cpu")
         test = train_DQN(env_id=env_id,device=device)
         test.load_model(1600)
+        test.model.q.eval()
         for i in range(10):
             # test.env.render()
             s = test.env.reset()
