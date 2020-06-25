@@ -259,13 +259,13 @@ class Q_Network(nn.Module):
             self.advantage2 = NoisyLinear(64, 1, device=self.device)
         else:
             self.action_out = nn.Sequential(
-                nn.Linear(1, self.a_out_unit),
+                nn.Linear(self.total_sample, self.a_out_unit),
                 nn.ReLU(),
             )
             self.advantage1 = NoisyLinear(self.concat_unit, 64, device=self.device)
             self.advantage2 = NoisyLinear(64, self.total_sample, device=self.device)
-        # self.value1 = NoisyLinear(self.feature_out_unit, 64, device=self.device)
-        # self.value2 = NoisyLinear(64, 1, device=self.device)
+        self.value1 = NoisyLinear(self.feature_out_unit, 64, device=self.device)
+        self.value2 = NoisyLinear(64, 1, device=self.device)
         
         
 
@@ -273,11 +273,11 @@ class Q_Network(nn.Module):
             x = x.reshape(-1,self.concat_unit)
             # x = self.concat_out(x)
             advantage = F.relu(self.advantage1(x))
-            advantage = self.advantage2(advantage)
+            advantage = self.advantage2(advantage).reshape(-1,self.total_sample)
 
-            # value = F.relu(self.value1(q_f))
-            # value = self.value2(value)
-            return advantage #+ value - advantage.mean(0, keepdim=True)
+            value = F.relu(self.value1(q_f))
+            value = self.value2(value)
+            return advantage + value - advantage.mean(1, keepdim=True)
 
     def embedding_feature(self, x):
             x = self.features(x)
@@ -285,8 +285,8 @@ class Q_Network(nn.Module):
             return x
 
     def reset_noise(self):
-        # self.value1.reset_noise()
-        # self.value2.reset_noise()
+        self.value1.reset_noise()
+        self.value2.reset_noise()
         self.advantage1.reset_noise()
         self.advantage2.reset_noise()
 
@@ -297,9 +297,10 @@ class Q_Network(nn.Module):
                 a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)#32,200,2
                 a_feature = a_mu.reshape(-1,self.num_actions)#32*200,2
                 a_out = self.action_out(a_feature).reshape(-1,self.total_sample, self.a_out_unit)#32,200,64
-                q_f = self.q_feature(state).repeat(1,self.total_sample).reshape(-1,self.total_sample, self.feature_out_unit)#32,200,64
+                q_f = self.q_feature(state)
+                q_con = q_f.repeat(1,self.total_sample).reshape(-1,self.total_sample, self.feature_out_unit)#32,200,64
                 # print(q_f.shape,a_out.shape)
-                x = torch.cat([a_out,q_f],dim=2)#32,200,128
+                x = torch.cat([a_out,q_con],dim=2)#32,200,128
                 x = F.relu(x)
                 q_values = self.forward(x,q_f).reshape(a_mu.shape[0], self.total_sample)
                 # print(q_values.shape)
