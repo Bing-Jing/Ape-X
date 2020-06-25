@@ -250,83 +250,43 @@ class Q_Network(nn.Module):
         if self.env_iscontinuous:
             # self.action_out = nn.Linear(self.num_actions, self.a_out_unit)
             self.action_out = nn.Sequential(
-                    nn.Linear(self.total_sample*self.num_actions, 128),
+                    nn.Linear(self.num_actions, 128),
                     nn.ReLU(),
                     nn.Linear(128, self.a_out_unit),
                     nn.ReLU(),
             )
+            self.advantage1 = NoisyLinear(self.concat_unit, 64, device=self.device)
+            self.advantage2 = NoisyLinear(64, 1, device=self.device)
         else:
             self.action_out = nn.Sequential(
-                nn.Linear(self.total_sample, self.a_out_unit),
+                nn.Linear(1, self.a_out_unit),
                 nn.ReLU(),
             )
-        # self.concat_out = nn.Sequential(
-        #         nn.Linear(self.concat_unit, 64),
-        #         nn.ReLU(),
-        #     )
-        # if env_iscontinuous:
-        #     self.advantage = nn.Sequential(
-        #         init(nn.Linear(self.concat_unit, 64)),
-        #         nn.ReLU(),
-        #         init(nn.Linear(64, 1))
-        #     )
-
-        #     self.value = nn.Sequential(
-        #         init(nn.Linear(self.feature_out_unit, 64)),
-        #         nn.ReLU(),
-        #         init(nn.Linear(64, 1))
-        #     )
-        # else:
-        # self.advantage = nn.Sequential(
-        #     init(nn.Linear(self.concat_unit, 64)),
-        #     nn.ReLU(),
-        #     init(nn.Linear(64, self.total_sample))
-        # )
-
-        # self.value = nn.Sequential(
-        #     init(nn.Linear(self.feature_out_unit, 64)),
-        #     nn.ReLU(),
-        #     init(nn.Linear(64, 1))
-        # )
-        self.value1 = NoisyLinear(self.feature_out_unit, 64, device=self.device)
-        self.value2 = NoisyLinear(64, 1, device=self.device)
+            self.advantage1 = NoisyLinear(self.concat_unit, 64, device=self.device)
+            self.advantage2 = NoisyLinear(64, self.total_sample, device=self.device)
+        # self.value1 = NoisyLinear(self.feature_out_unit, 64, device=self.device)
+        # self.value2 = NoisyLinear(64, 1, device=self.device)
         
-        self.advantage1 = NoisyLinear(self.concat_unit, 64, device=self.device)
-        self.advantage2 = NoisyLinear(64, self.total_sample, device=self.device)
+        
 
     def forward(self, x,q_f):
             x = x.reshape(-1,self.concat_unit)
             # x = self.concat_out(x)
-            # advantage = self.advantage(x)
             advantage = F.relu(self.advantage1(x))
             advantage = self.advantage2(advantage)
 
-            # value = self.value(q_f)
-            value = F.relu(self.value1(q_f))
-            value = self.value2(value)
-            return advantage + value - advantage.mean(1, keepdim=True)
+            # value = F.relu(self.value1(q_f))
+            # value = self.value2(value)
+            return advantage #+ value - advantage.mean(0, keepdim=True)
 
     def embedding_feature(self, x):
             x = self.features(x)
             x = x.reshape(-1,128)
             return x
-    # def compute_Q(self, a_out, q_f):
-    #     advantages = []
-    #     for i in range(self.total_sample):
-    #         tmp_a = a_out[i].reshape(-1,self.a_out_unit)
-    #         x = torch.cat([tmp_a,q_f],dim=1) # 32,128
-    #         x = F.relu(x)
-    #         x = self.advantage(x).cpu().detach().numpy()
-    #         advantages.append(x)
-    #     advantages = torch.FloatTensor(advantages).reshape(-1,self.total_sample).to(self.device)
-    #     # print(advantages.shape)
-    #     v = self.value(q_f)
-    #     # print(v.shape)
-    #     return v + advantages - advantages.mean(1, keepdim=True)
 
     def reset_noise(self):
-        self.value1.reset_noise()
-        self.value2.reset_noise()
+        # self.value1.reset_noise()
+        # self.value2.reset_noise()
         self.advantage1.reset_noise()
         self.advantage2.reset_noise()
 
@@ -334,21 +294,25 @@ class Q_Network(nn.Module):
             # print(a_mu.shape)
             if self.env_iscontinuous:
                 ### ver 1
-                # a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
-                # a_feature = a_mu.reshape(-1,self.num_actions)
-                # a_out = self.action_out(a_feature).reshape(self.total_sample,-1,  self.a_out_unit)#200,32,64
-                # q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)#32,64
-                # q_values = self.compute_Q(a_out,q_f)
-
-                ### ver2
-                a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
-                a_feature = a_mu.reshape(-1,self.total_sample*self.num_actions)
-                a_out = self.action_out(a_feature).reshape(-1, self.a_out_unit)
-                q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)
+                a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)#32,200,2
+                a_feature = a_mu.reshape(-1,self.num_actions)#32*200,2
+                a_out = self.action_out(a_feature).reshape(-1,self.total_sample, self.a_out_unit)#32,200,64
+                q_f = self.q_feature(state).repeat(1,self.total_sample).reshape(-1,self.total_sample, self.feature_out_unit)#32,200,64
                 # print(q_f.shape,a_out.shape)
-                x = torch.cat([a_out,q_f],dim=1)#32,128
+                x = torch.cat([a_out,q_f],dim=2)#32,200,128
+                x = F.relu(x)
                 q_values = self.forward(x,q_f).reshape(a_mu.shape[0], self.total_sample)
                 # print(q_values.shape)
+
+                ### ver2
+                # a_mu = a_mu.reshape(-1,self.total_sample, self.num_actions)
+                # a_feature = a_mu.reshape(-1,self.total_sample*self.num_actions)
+                # a_out = self.action_out(a_feature).reshape(-1, self.a_out_unit)
+                # q_f = self.q_feature(state).reshape(-1, self.feature_out_unit)
+                # # print(q_f.shape,a_out.shape)
+                # x = torch.cat([a_out,q_f],dim=1)#32,128
+                # q_values = self.forward(x,q_f).reshape(a_mu.shape[0], self.total_sample)
+                # # print(q_values.shape)
                 
             else:
                 a_feature = a_mu.reshape(-1,self.total_sample).float()

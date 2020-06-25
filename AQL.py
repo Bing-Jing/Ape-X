@@ -1,7 +1,7 @@
 import math, random
 
 import gym
-import pybulletgym
+# import pybulletgym
 import numpy as np
 
 import torch
@@ -28,7 +28,7 @@ class train_DQN():
         self.ent_lam = ent_lam
         self.lr = 1e-4
 
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
         self.env = gym.make(env_id)
         self.model = AQL(env = self.env, propose_sample=propose_sample, uniform_sample = uniform_sample,
                              action_var = action_var, device=self.device).to(self.device)
@@ -155,9 +155,9 @@ class train_DQN():
                 print("loading weights_{}".format(idx))
                 self.model.load_state_dict(torch.load(f,map_location="cpu"))
 
-training = True
+training = False
 if __name__ == "__main__":
-    env_id = "CartPole-v0"
+    env_id = "Pendulum-v0"
 
     test = train_DQN(env_id=env_id)
     if training:
@@ -165,11 +165,10 @@ if __name__ == "__main__":
     else:
         # test.device = "cpu"
         # test.model.to("cpu")
-        test.load_model(20)
+        test.load_model(200)
         for i in range(10):
             # test.env.render()
             s = test.env.reset()
-            s = torch.FloatTensor(s).to(test.device)
             er = 0
             d = False
             while True:
@@ -177,7 +176,6 @@ if __name__ == "__main__":
                 a, a_mu,_ = test.model.act(s, epsilon=0)
                 s, r, d, _ = test.env.step(a_mu[0][a])
                 er+=r
-                s = torch.FloatTensor(s).to(test.device)
                 if d:
                     print(er)
                     break

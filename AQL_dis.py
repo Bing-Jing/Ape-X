@@ -74,17 +74,6 @@ class train_DQN():
 
         
         q_values      = self.model(state, a_mu)
-        # next_q_values = self.target_model(next_state, a_mu)
-        # q_value = q_values[torch.arange(batch_size), action].to(self.device)
-        
-        # next_q_value     = next_q_values.max(1)[0].to(self.device)
-        # expected_q_value = reward + self.gamma * next_q_value * (1 - done)
-        
-        # td_error = torch.abs(expected_q_value.detach() - q_value)
-        
-        # loss_q  = (td_error).pow(2) * weights
-        # prios = loss_q+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
-        # loss_q  = loss_q.mean()
         
 
         embed_state = self.model.q.embedding_feature(state)
@@ -153,7 +142,7 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "CartPole-v0"#"BipedalWalker-v3"#"BipedalWalker-v3"#"LunarLanderContinuous-v2"#"LunarLander-v2"#"MountainCarContinuous-v0"#
+    env_id = "Pendulum-v0"#"MountainCar-v0"#"CartPole-v0"#"BipedalWalker-v3"#"BipedalWalker-v3"#"LunarLanderContinuous-v2"#"LunarLander-v2"#"MountainCarContinuous-v0"#
    
     if training:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
