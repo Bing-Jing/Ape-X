@@ -17,8 +17,8 @@ import copy
 import utils
 class train_DQN():
     def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4,
-                    publish_param_interval=5, device = "cuda:0", n_steps=3,
-                    batch_size = 32, gamma = 0.997, target_update_interval=20, save_interval = 200,
+                    publish_param_interval=5, device = "cuda:0", n_steps=1,
+                    batch_size = 32, gamma = 0.99, target_update_interval=20, save_interval = 200,
                     propose_sample=1, uniform_sample = 50, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
@@ -97,7 +97,7 @@ class train_DQN():
         loss_p = torch.mean(loss_p)
         self.optimizer_proposal.zero_grad()
         loss_p.backward()
-        # torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
+        torch.nn.utils.clip_grad.clip_grad_norm_(self.model.proposal.parameters(), 40)
         
         self.optimizer_proposal.step()
         self.update_target(self.model.proposal, self.target_model.proposal)
@@ -118,14 +118,15 @@ class train_DQN():
         
         return loss_q, loss_p
     def train(self):
-        self.model.q.train()
-        self.target_model.q.train()
+        
         learn_idx = 0
         for frame_idx in range(self.max_step):
+            self.model.q.train()
+            self.target_model.q.train()
             self.recoder.set_worker_weights(copy.deepcopy(self.model))
             
             total_ep = self.recoder.record_batch()
-            for _ in range(total_ep//self.batch_size//2):
+            for _ in range(total_ep//self.batch_size):
                 
                 if len(self.replay_buffer) > self.batch_size:
                     beta = self.beta_by_frame(frame_idx)
@@ -152,7 +153,7 @@ class train_DQN():
 
 training = True
 if __name__ == "__main__":
-    env_id = "MountainCar-v0"#"BipedalWalker-v3"#"LunarLanderContinuous-v2"#"LunarLander-v2"#"CartPole-v0""MountainCarContinuous-v0"#
+    env_id = "CartPole-v0"#"BipedalWalker-v3"#"BipedalWalker-v3"#"LunarLanderContinuous-v2"#"LunarLander-v2"#"MountainCarContinuous-v0"#
    
     if training:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

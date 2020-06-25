@@ -252,8 +252,6 @@ class Q_Network(nn.Module):
             self.action_out = nn.Sequential(
                     nn.Linear(self.total_sample*self.num_actions, 128),
                     nn.ReLU(),
-                    nn.Linear(128, 128),
-                    nn.ReLU(),
                     nn.Linear(128, self.a_out_unit),
                     nn.ReLU(),
             )
@@ -299,9 +297,11 @@ class Q_Network(nn.Module):
     def forward(self, x,q_f):
             x = x.reshape(-1,self.concat_unit)
             # x = self.concat_out(x)
+            # advantage = self.advantage(x)
             advantage = F.relu(self.advantage1(x))
             advantage = self.advantage2(advantage)
 
+            # value = self.value(q_f)
             value = F.relu(self.value1(q_f))
             value = self.value2(value)
             return advantage + value - advantage.mean(1, keepdim=True)
@@ -385,7 +385,7 @@ class Proposal_Network(nn.Module):
                 init(nn.Linear(128,128)),
                 nn.ReLU(),
                 init(nn.Linear(128,self.num_actions)),
-                nn.Softmax(dim=1)
+                # nn.Softmax(dim=1)
             )
         self.action_var = torch.full((self.num_actions,), action_var)
         if self.env_iscontinuous:
@@ -400,7 +400,7 @@ class Proposal_Network(nn.Module):
                 a_dist = dist.sample([self.propose_sample]).reshape((-1,self.propose_sample,self.num_actions))
                 a_mu = torch.cat([a_uniform,a_dist],dim=1)
             else:  # discrete
-                dist = Categorical(mu)
+                dist = Categorical(logits=mu)
                 a_dist = dist.sample([self.propose_sample]).reshape(mu.shape[0],self.propose_sample)
                 a_uniform = np.random.choice(torch.arange(self.num_actions),size=self.uniform_sample,replace=False)
                 a_uniform = torch.LongTensor(a_uniform).reshape(mu.shape[0],self.uniform_sample).to(self.device)
