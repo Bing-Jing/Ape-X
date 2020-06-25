@@ -56,24 +56,9 @@ def compute_loss_AQL(model, tgt_model, batch, n_steps, gamma=0.99):
     td_error = torch.abs(expected_q_a_values.detach() - q_a_values)
     prios = (0.9*torch.max(td_error)+0.1*td_error + 1e-6).data.cpu().numpy()
 
-    loss = td_error ** 2#torch.where(td_error < 1, 0.5 * td_error ** 2, td_error - 0.5)
+    loss = torch.where(td_error < 1, 0.5 * td_error ** 2, td_error - 0.5)
     loss = (loss * weights).mean()
     return loss, prios
-
-    # states, actions, rewards, next_states, dones, a_mu, weights = batch
-    # q_values      = model(states, a_mu)
-    # next_q_values = tgt_model(next_states, a_mu)
-    # q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
-        
-    # next_q_value     = next_q_values.max(1)[0]
-    # expected_q_value = rewards + gamma * next_q_value * (1 - dones)
-        
-    # td_error = torch.abs(expected_q_value.detach() - q_value)
-        
-    # loss_q  = (td_error).pow(2) * weights
-    # prios = loss_q.data.cpu().numpy()+1e-5#0.9 * torch.max(td_error)+0.1*td_error+1e-5
-    # loss_q  = loss_q.mean()
-    # return loss_q, prios
     
     
 def compute_loss(model, tgt_model, batch, n_steps, gamma=0.99):

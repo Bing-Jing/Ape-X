@@ -19,7 +19,7 @@ class train_DQN():
     def __init__(self, env_id, max_step = 1e6, prior_alpha = 0.6, prior_beta_start = 0.4,
                     publish_param_interval=5, device = "cuda:0", n_steps=1,
                     batch_size = 32, gamma = 0.99, target_update_interval=20, save_interval = 200,
-                    propose_sample=1, uniform_sample = 50, action_var = 0.25, ent_lam = 0.8, n_workers=10):
+                    propose_sample=50, uniform_sample = 50, action_var = 0.25, ent_lam = 0.8, n_workers=10):
         self.prior_beta_start = prior_beta_start
         self.max_step = int(max_step)
         self.batch_size = batch_size
@@ -48,7 +48,7 @@ class train_DQN():
         
         self.writer = SummaryWriter(comment="-{}-learner".format(self.env.unwrapped.spec.id))
         self.recoder = BatchRecorder(env_id, env_seed=0, n_workers=n_workers, buffer=self.replay_buffer, 
-                                        max_episode_length=50000, writer=self.writer, n_steps=n_steps, gamma=gamma,
+                                        max_episode_length=50000, writer=self.writer, #n_steps=n_steps, gamma=gamma,
                                         propose_sample=propose_sample, uniform_sample = uniform_sample, 
                                         action_var = action_var, device = self.device)
 

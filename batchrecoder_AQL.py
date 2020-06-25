@@ -11,7 +11,7 @@ import itertools
 
 
 class Worker(mp.Process):
-    def __init__(self, worker_id, env_id, seed, epsilon, task_queue, buffer, max_episode_length,n_steps, gamma,
+    def __init__(self, worker_id, env_id, seed, epsilon, task_queue, buffer, max_episode_length,
                     propose_sample=100, uniform_sample = 400, action_var = 0.25, device = "cuda"):
         mp.Process.__init__(self)
         self.worker_id = worker_id
@@ -20,7 +20,7 @@ class Worker(mp.Process):
         self.task_queue = task_queue
         self.buffer = buffer
         self.max_episode_length = max_episode_length
-        self.memory = BatchStorage(n_steps=1)
+        self.memory = []
         
         self.model = AQL(self.env,propose_sample=propose_sample, uniform_sample = uniform_sample, action_var = action_var, device = device)
         # self.writer = SummaryWriter(comment="-{}-actor{}".format(env_id, worker_id))
@@ -39,12 +39,12 @@ class Worker(mp.Process):
 
         self.episode_reward, self.episode_length, episode_idx, actor_idx = 0, 0, 0, 0
         state = self.env.reset()
-        self.memory.reset()
+        self.memory = []
         while True:
-            action, a_mu, q_value = self.model.act(state, self.epsilon)
+            action, a_mu, _ = self.model.act(state, self.epsilon)
             a_mu = a_mu[0]
             next_state, reward, done, _ = self.env.step(a_mu[action])
-            self.memory.add(state,reward,action,done,a_mu,q_value)
+            self.memory.append((state, action, reward, next_state, done, a_mu))
             
             state = next_state
             self.episode_reward += reward
@@ -65,11 +65,7 @@ class Worker(mp.Process):
             if task["desc"] == "record_batch":
                 # print("start record batch")
                 self.record_batch()
-                batch, prior = self.memory.make_batch()
-                mem = []
-                for i in range(len(batch[0])):
-                    mem.append((batch[0][i],batch[1][i],batch[2][i],batch[3][i],batch[4][i],batch[5][i]))
-                self.buffer.put((mem, prior, self.episode_reward, self.episode_length))
+                self.buffer.put((self.memory, self.episode_reward, self.episode_length))
                 self.task_queue.task_done()
                 # print("record batch done")
             elif task["desc"] == "set_pi_weights":
@@ -84,7 +80,7 @@ class Worker(mp.Process):
                 # print("clean up done")
 
 class BatchRecorder():
-    def __init__(self, env_id, env_seed, n_workers, buffer, max_episode_length, writer,n_steps,gamma,
+    def __init__(self, env_id, env_seed, n_workers, buffer, max_episode_length, writer,
                     propose_sample=100, uniform_sample = 400, action_var = 0.25, device = "cuda"):
         self.env_id = env_id
         # empty batch recorder
@@ -100,7 +96,7 @@ class BatchRecorder():
         self.workers = []
         for i in range(self.n_workers):
             self.workers.append(
-                Worker(worker_id=i, env_id=self.env_id, seed=self.env_seed+i, n_steps=n_steps, gamma=gamma,
+                Worker(worker_id=i, env_id=self.env_id, seed=self.env_seed+i, 
                         epsilon= 0.4 ** (1 + i / (self.n_workers - 1) * 7),#0.8 if i < n_workers//3 else 0.05, 
                         max_episode_length=max_episode_length,
                         task_queue=self.task_queue, buffer=self.res_queue,
@@ -117,14 +113,14 @@ class BatchRecorder():
             self.task_queue.put(task)
         self.task_queue.join()
         for i in range(self.n_workers):
-            mem, priors, ep_r, ep_len = self.res_queue.get()
+            mem, ep_r, ep_len = self.res_queue.get()
             total_ep+=ep_len
             self.writer.add_scalar("actor/episode_reward", ep_r, self.episode_idx )
             self.writer.add_scalar("actor/episode_length", ep_len, self.episode_idx )
             self.episode_idx += 1
-            for idx, (state, action, reward, next_state, done, a_mu) in enumerate(mem):
-                    self.buffer.add(state, action, reward, next_state, done, a_mu, priors[idx])
-                    
+            for (state, action, reward, next_state, done, a_mu) in mem:
+                    for _ in range(len(state)):
+                        self.buffer.add(state, action, reward, next_state, done, a_mu)
 
         return total_ep
     def set_worker_weights(self, pi):
